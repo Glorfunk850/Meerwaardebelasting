@@ -16,6 +16,7 @@ De versie die op je claude.ai-link draait. Alles werkt in de browser; er is geen
 | `saxo.js` | Importer voor de Saxo-export "Trades" (Excel of CSV) |
 | `xlsx.js` | Minimale Excel-lezer zonder externe bibliotheek |
 | `build.py` | Voegt alles samen tot `index.html` |
+| `manifest.webmanifest`, `sw.js`, `icon*` | Installeerbare app (PWA) op GitHub Pages; niet gebruikt op claude.ai |
 | `*.test.js` | Tests (Node 18+) |
 
 ## Bouwen en testen
@@ -33,6 +34,17 @@ SAXO_FILE=pad/naar/Trades.xlsx node --test saxo.test.js
 
 Lokaal openen: `python3 -m http.server` in deze map en ga naar http://localhost:8000. Buiten claude.ai bewaart de
 pagina gegevens alleen in je browser (localStorage); maak een back-up via Instellingen.
+
+## Installeren als app (GitHub Pages)
+
+Op https://glorfunk850.github.io/Meerwaardebelasting/ is de tool als app te installeren (Chrome/Edge: 'App installeren'
+in de adresbalk of via Instellingen → *Als app installeren*; iPhone/iPad: Safari → Deel → *Zet op beginscherm*).
+De service worker (`sw.js`) haalt altijd eerst de nieuwste versie op en valt zonder verbinding terug op de laatst
+bewaarde kopie. Verhoog `CACHE` in `sw.js` als je de lijst met bestanden wijzigt.
+
+Gegevens staan in die versie alleen in de browser (localStorage), los van de claude.ai-pagina. Overzetten gaat via
+Instellingen → Back-up downloaden en Back-up herstellen. Op claude.ai en bij een lokaal geopend bestand doet de
+installatiecode niets.
 
 ## Eigen keuzes en interpretaties
 

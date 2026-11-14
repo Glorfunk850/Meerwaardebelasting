@@ -10,7 +10,7 @@ Rekenhulp voor de Belgische meerwaardebelasting op financiële activa voor parti
 
 | Map | Wat | Gebruik |
 |---|---|---|
-| [`browser/`](browser/) | Volledige tool in één HTML-pagina: transacties, rapport, delisting, import van Bolero- en Saxo-exports, back-up. Draait volledig in de browser. | Dagelijks gebruik |
+| [`browser/`](browser/) | Volledige tool in één HTML-pagina: transacties, rapport, delisting, import van Bolero- en Saxo-exports, back-up. Draait volledig in de browser. | Dagelijks gebruik; installeerbaar als app via [GitHub Pages](https://glorfunk850.github.io/Meerwaardebelasting/) |
 | [`python/`](python/) | Dezelfde rekenkern in Python (`engine/`) met een lokale Flask-webapp (`web/`) en SQLite. | Referentie-implementatie, scripts, lokaal draaien |
 
 Beide rekenkernen volgen dezelfde regels en geven identieke resultaten (getoetst met gelijke testgevallen en

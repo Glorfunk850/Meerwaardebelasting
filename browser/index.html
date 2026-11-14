@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Meerwaardebelasting</title>
+<meta name="theme-color" content="#1f5f8b">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f5f8b'/%3E%3Ctext x='16' y='23' font-size='19' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'%3E%E2%82%AC%3C/text%3E%3C/svg%3E">
 <style>
 :root {
@@ -236,6 +237,11 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
         <textarea id="import-text" placeholder="Plak hier de JSON van een back-up"></textarea>
         <p><button class="btn" id="btn-import-paste">Herstellen</button></p></details>
       <p style="margin-top:1rem"><button class="btn small danger" id="btn-reset">Alle gegevens wissen</button></p>
+    </div>
+    <div class="panel" id="install-panel" hidden>
+      <h3>Als app installeren</h3>
+      <p class="hint" id="install-hint"></p>
+      <p><button class="btn primary" id="btn-install" hidden>Installeren</button></p>
     </div>
     <p class="hint">Rekenregels: wet van 6 april 2026 (BS 21 april 2026) en circulaire 2026/C/74. Tarief 10%; vrijstelling 2026 € 10.000;
       overdracht van het ongebruikte deel van de eerste schijf van € 1.000, 5 jaar geldig; fotowaarde 31/12/2025; hogere bewezen
@@ -1768,6 +1774,15 @@ async function offerDownload(filename, text, fallbackLabel) {
     try { await dl.save({ filename, data: text }); return; }
     catch (e) { if (e && /declin|cancel|reject/i.test(String(e.code || e.message))) return; }
   }
+  if (!use) { // buiten claude.ai: gewoon als bestand downloaden
+    try {
+      const url = URL.createObjectURL(new Blob([text], { type: filename.endsWith(".csv") ? "text/csv" : "application/json" }));
+      const a = Object.assign(document.createElement("a"), { href: url, download: filename });
+      document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      return;
+    } catch {}
+  }
   try { await navigator.clipboard.writeText(text); toast(`${fallbackLabel} gekopieerd naar het klembord`); }
   catch { showTextDialog(fallbackLabel, text); }
 }
@@ -2017,6 +2032,35 @@ document.addEventListener("click", e => {
   if (a.dataset.action === "new-tx") { if (currentTab() !== "transacties") location.hash = "transacties"; openTxDialog(null); }
   if (a.dataset.action === "load-example") loadExample();
 });
+
+// ================================================================ installeerbare app (enkel op een eigen adres, niet op claude.ai)
+function setupInstall() {
+  const host = location.hostname;
+  if (location.protocol === "file:" || /claude/i.test(host) || window.claude || !("serviceWorker" in navigator)) return;
+  if (!window.isSecureContext) return;
+  for (const [rel, href] of [["manifest", "manifest.webmanifest"], ["apple-touch-icon", "apple-touch-icon.png"]]) {
+    document.head.append(Object.assign(document.createElement("link"), { rel, href }));
+  }
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+  const panel = $("#install-panel"), hint = $("#install-hint"), btn = $("#btn-install");
+  const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
+  panel.hidden = false;
+  if (standalone) { hint.textContent = "Geïnstalleerd: je werkt in de app. Gegevens blijven in deze browser; maak regelmatig een back-up."; return; }
+  hint.textContent = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+    ? "In Safari: tik op Deel en kies 'Zet op beginscherm'."
+    : "Gebruik in je browser 'App installeren' (in de adresbalk of het menu). Werkt daarna ook zonder internet.";
+  let deferred = null;
+  window.addEventListener("beforeinstallprompt", e => {
+    e.preventDefault(); deferred = e; btn.hidden = false;
+    hint.textContent = "Installeer de tool als app op dit toestel. Werkt daarna ook zonder internet.";
+  });
+  btn.addEventListener("click", async () => {
+    if (!deferred) return;
+    deferred.prompt(); await deferred.userChoice.catch(() => null); deferred = null; btn.hidden = true;
+  });
+  window.addEventListener("appinstalled", () => { btn.hidden = true; hint.textContent = "Geïnstalleerd. Gegevens blijven in deze browser; maak regelmatig een back-up."; });
+}
+setupInstall();
 
 initStorage();
 </script>

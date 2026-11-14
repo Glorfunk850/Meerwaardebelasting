@@ -585,6 +585,15 @@ async function offerDownload(filename, text, fallbackLabel) {
     try { await dl.save({ filename, data: text }); return; }
     catch (e) { if (e && /declin|cancel|reject/i.test(String(e.code || e.message))) return; }
   }
+  if (!use) { // buiten claude.ai: gewoon als bestand downloaden
+    try {
+      const url = URL.createObjectURL(new Blob([text], { type: filename.endsWith(".csv") ? "text/csv" : "application/json" }));
+      const a = Object.assign(document.createElement("a"), { href: url, download: filename });
+      document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      return;
+    } catch {}
+  }
   try { await navigator.clipboard.writeText(text); toast(`${fallbackLabel} gekopieerd naar het klembord`); }
   catch { showTextDialog(fallbackLabel, text); }
 }
@@ -834,5 +843,34 @@ document.addEventListener("click", e => {
   if (a.dataset.action === "new-tx") { if (currentTab() !== "transacties") location.hash = "transacties"; openTxDialog(null); }
   if (a.dataset.action === "load-example") loadExample();
 });
+
+// ================================================================ installeerbare app (enkel op een eigen adres, niet op claude.ai)
+function setupInstall() {
+  const host = location.hostname;
+  if (location.protocol === "file:" || /claude/i.test(host) || window.claude || !("serviceWorker" in navigator)) return;
+  if (!window.isSecureContext) return;
+  for (const [rel, href] of [["manifest", "manifest.webmanifest"], ["apple-touch-icon", "apple-touch-icon.png"]]) {
+    document.head.append(Object.assign(document.createElement("link"), { rel, href }));
+  }
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+  const panel = $("#install-panel"), hint = $("#install-hint"), btn = $("#btn-install");
+  const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
+  panel.hidden = false;
+  if (standalone) { hint.textContent = "Geïnstalleerd: je werkt in de app. Gegevens blijven in deze browser; maak regelmatig een back-up."; return; }
+  hint.textContent = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+    ? "In Safari: tik op Deel en kies 'Zet op beginscherm'."
+    : "Gebruik in je browser 'App installeren' (in de adresbalk of het menu). Werkt daarna ook zonder internet.";
+  let deferred = null;
+  window.addEventListener("beforeinstallprompt", e => {
+    e.preventDefault(); deferred = e; btn.hidden = false;
+    hint.textContent = "Installeer de tool als app op dit toestel. Werkt daarna ook zonder internet.";
+  });
+  btn.addEventListener("click", async () => {
+    if (!deferred) return;
+    deferred.prompt(); await deferred.userChoice.catch(() => null); deferred = null; btn.hidden = true;
+  });
+  window.addEventListener("appinstalled", () => { btn.hidden = true; hint.textContent = "Geïnstalleerd. Gegevens blijven in deze browser; maak regelmatig een back-up."; });
+}
+setupInstall();
 
 initStorage();
