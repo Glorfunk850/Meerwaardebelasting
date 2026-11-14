@@ -1,0 +1,2024 @@
+<!DOCTYPE html>
+<html lang="nl-BE">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meerwaardebelasting</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f5f8b'/%3E%3Ctext x='16' y='23' font-size='19' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'%3E%E2%82%AC%3C/text%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #f5f6f8; --panel: #fff; --ink: #1b2430; --muted: #5d6978; --line: #e2e6eb;
+  --accent: #1f5f8b; --accent-soft: #e7f0f8; --pos: #146c43; --neg: #b02a37;
+  --warn-bg: #fff6e0; --warn: #7d5300; --radius: 12px;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-size: 15px; line-height: 1.45; -webkit-text-size-adjust: 100%; }
+h1, h2, h3, h4 { margin: 0; }
+h2 { font-size: 1.25rem; }
+h3 { font-size: 1.02rem; margin: 1.4rem 0 .6rem; }
+a { color: var(--accent); }
+
+.top { background: var(--panel); border-bottom: 1px solid var(--line); padding: .75rem 1rem 0; position: sticky; top: 0; z-index: 5; }
+.brand { display: flex; gap: .65rem; align-items: center; max-width: 1100px; margin: 0 auto; }
+.logo { width: 34px; height: 34px; border-radius: 9px; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 700; flex: none; }
+.brand h1 { font-size: 1.05rem; }
+.sub { margin: 0; color: var(--muted); font-size: .78rem; }
+.tabs { display: flex; gap: .1rem; margin: .5rem auto 0; overflow-x: auto; max-width: 1100px; scrollbar-width: none; }
+.tabs a { padding: .6rem .8rem; color: var(--muted); border-bottom: 2px solid transparent; text-decoration: none; white-space: nowrap; position: relative; }
+.tabs a.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.dot { position: absolute; top: .45rem; right: .25rem; width: 7px; height: 7px; border-radius: 50%; background: var(--neg); }
+
+.notice { max-width: 1100px; margin: 0 auto; padding: .5rem 1rem 0; display: flex; flex-direction: column; gap: .35rem; }
+.disclaimer, .storage { font-size: .82rem; padding: .45rem .7rem; border-radius: 8px; }
+.disclaimer { background: var(--warn-bg); color: var(--warn); }
+.storage { background: #eef2f6; color: var(--muted); }
+.storage.ok { background: #e8f4ee; color: var(--pos); }
+.storage.warn { background: var(--warn-bg); color: var(--warn); }
+.storage:empty { display: none; }
+
+main { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+.tab { display: none; } .tab.active { display: block; }
+.toolbar { display: flex; justify-content: space-between; align-items: center; gap: .5rem; margin-bottom: .7rem; flex-wrap: wrap; }
+
+.btn { border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: .5rem .9rem; border-radius: 9px; font: inherit; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: .3rem; min-height: 38px; }
+.btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn.ghost { background: transparent; }
+.btn.small { padding: .2rem .55rem; font-size: .85rem; min-height: 30px; }
+.btn.danger { color: var(--neg); }
+.btn:active { transform: translateY(1px); }
+label.btn input[type=file] { display: none; }
+
+.muted { color: var(--muted); } .small { font-size: .84rem; }
+.hint { display: block; color: var(--muted); font-size: .8rem; margin-top: .25rem; }
+.empty { color: var(--muted); text-align: center; padding: 1.5rem 0; }
+.alert { padding: .65rem .85rem; border-radius: 9px; margin: .6rem 0; }
+.alert.error { background: #fdecee; color: var(--neg); border: 1px solid #f5c2c7; }
+.alert.warn { background: var(--warn-bg); color: var(--warn); border: 1px solid #f0dfb2; }
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem; margin-bottom: 1rem; }
+.panel h3 { margin-top: 0; }
+.row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+
+.filters { display: flex; gap: .6rem; flex-wrap: wrap; margin-bottom: .7rem; align-items: flex-end; }
+.filters label { display: flex; flex-direction: column; font-size: .78rem; color: var(--muted); gap: .2rem; }
+input, select, textarea { font: inherit; font-size: 16px; padding: .45rem .55rem; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); min-width: 0; }
+input:focus, select:focus, textarea:focus { outline: 2px solid #9cc3e0; border-color: var(--accent); }
+input:disabled { background: #f1f3f5; color: var(--muted); }
+
+.table-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+th, td { padding: .5rem .6rem; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+th { background: #fafbfc; font-weight: 600; color: var(--muted); font-size: .78rem; }
+tr:last-child td { border-bottom: 0; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+td input, td select { width: 100%; min-width: 100px; font-size: 14px; }
+td input.w-sm { min-width: 64px; } td input.w-xs { min-width: 48px; }
+td.actions-cell { text-align: right; }
+tr.clickable { cursor: pointer; } tr.clickable:hover td { background: #f3f7fb; }
+
+.badge { display: inline-block; padding: .08rem .45rem; border-radius: 999px; font-size: .74rem; font-weight: 600; background: #eef2f6; color: var(--muted); }
+.badge.BUY, .badge.TRANSFER_IN, .badge.GIFT_IN, .badge.INHERIT_IN { background: var(--accent-soft); color: var(--accent); }
+.badge.SELL { background: #fdf0e6; color: #9a4700; }
+.badge.need { background: #fdecee; color: var(--neg); }
+.badge.ok { background: #e8f4ee; color: var(--pos); }
+.alert.ok { background: #e8f4ee; color: var(--pos); border: 1px solid #b9dcc8; }
+tr.suspicious td { background: #fff8f8; }
+#import-dialog.saxo .col-div { display: none; }
+.pos { color: var(--pos); } .neg { color: var(--neg); }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; margin-top: .5rem; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem; }
+.card h4 { margin: 0 0 .6rem; display: flex; justify-content: space-between; font-size: 1.05rem; }
+.kv { display: grid; grid-template-columns: 1fr auto; gap: .22rem .8rem; font-size: .9rem; margin: 0; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.kv .sep { grid-column: 1 / -1; border-top: 1px solid var(--line); margin: .3rem 0; }
+.kv .strong { font-weight: 700; color: var(--ink); }
+.big { font-size: 1.4rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.result-line { display: flex; justify-content: space-between; align-items: baseline; margin-top: .8rem; padding-top: .6rem; border-top: 1px solid var(--line); }
+
+.sales details { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: .5rem; }
+.sales summary { cursor: pointer; padding: .7rem .9rem; display: flex; gap: .3rem .8rem; align-items: center; flex-wrap: wrap; list-style: none; }
+.sales summary::-webkit-details-marker { display: none; }
+.sales summary::before { content: "▸"; color: var(--muted); }
+.sales details[open] summary::before { content: "▾"; }
+.sales summary .grow { flex: 1; }
+.sales .detail { padding: 0 .9rem .8rem; }
+.event { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: .7rem .9rem; margin-bottom: .5rem; }
+.event p { margin: .35rem 0 0; }
+
+dialog { border: 0; border-radius: 14px; padding: 0; width: min(680px, 96vw); max-height: 92vh; box-shadow: 0 20px 60px rgba(0,0,0,.25); color: var(--ink); }
+dialog::backdrop { background: rgba(20, 30, 40, .45); }
+dialog form, dialog .body { padding: 1.1rem; }
+dialog h3 { margin-top: 0; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: .1rem .7rem; }
+.field { display: flex; flex-direction: column; gap: .25rem; font-size: .84rem; color: var(--muted); margin-bottom: .55rem; }
+.check { display: flex; gap: .5rem; align-items: flex-start; font-size: .9rem; margin: .4rem 0; }
+.check input { width: 18px; height: 18px; margin-top: .1rem; flex: none; }
+.actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 1rem; flex-wrap: wrap; }
+.actions .left { margin-right: auto; }
+.inline-form { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .8rem; }
+.inline-form input { width: 130px; }
+textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; font-size: 13px; }
+.toast { position: fixed; left: 50%; bottom: 1.2rem; transform: translate(-50%, 150%); background: #1b2430; color: #fff; padding: .6rem 1rem; border-radius: 10px; font-size: .9rem; transition: transform .25s; z-index: 50; max-width: 92vw; box-shadow: 0 6px 20px rgba(0,0,0,.2); }
+.toast.show { transform: translate(-50%, 0); }
+.toast.error { background: var(--neg); }
+[hidden] { display: none !important; }
+
+@media (max-width: 600px) {
+  main { padding: .7rem; }
+  .cards { grid-template-columns: 1fr; }
+  .hide-sm { display: none; }
+  th, td { padding: .5rem .45rem; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <span class="logo" aria-hidden="true">€</span>
+    <div><h1>Meerwaardebelasting</h1><p class="sub">België · algemeen regime · wet van 6 april 2026</p></div>
+  </div>
+  <nav class="tabs">
+    <a href="#rapport">Rapport</a>
+    <a href="#transacties">Transacties</a>
+    <a href="#activa">Activa<span class="dot" id="assets-dot" hidden></span></a>
+    <a href="#instellingen">Instellingen</a>
+  </nav>
+</header>
+<div class="notice">
+  <div class="disclaimer" role="note">Rekenhulp, geen fiscaal advies. Controleer met de FOD Financiën of een adviseur.</div>
+  <div id="storage-status" class="storage" role="status"></div>
+</div>
+
+<main>
+  <section id="tab-rapport" class="tab">
+    <div class="toolbar"><h2>Rapport</h2>
+      <div class="row"><button class="btn ghost" id="btn-csv">CSV per verkoop</button>
+        <button class="btn primary" data-action="new-tx">+ Transactie</button></div></div>
+    <div id="report-error" class="alert error" hidden></div>
+    <div id="report-settings" class="muted small"></div>
+    <div id="year-cards" class="cards"></div>
+    <h3 id="sales-title">Verkopen</h3>
+    <div id="sales" class="sales"></div>
+    <h3 id="events-title" hidden>Gebeurtenissen zonder belastbaar moment</h3>
+    <div id="events"></div>
+  </section>
+
+  <section id="tab-transacties" class="tab">
+    <div class="toolbar"><h2>Transacties <span id="tx-count" class="muted small"></span></h2>
+      <div class="row">
+        <label class="btn ghost">Export importeren (Bolero/Saxo)<input type="file" id="import-bolero" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></label>
+        <button class="btn primary" data-action="new-tx">+ Nieuwe transactie</button></div></div>
+    <div class="filters">
+      <label>Jaar <select id="f-year"><option value="">Alle</option></select></label>
+      <label>Eigenaar <select id="f-owner"><option value="">Alle</option></select></label>
+      <label>Actief <input id="f-asset" placeholder="ISIN/ticker" size="12"></label>
+    </div>
+    <div class="table-wrap"><table id="tx-table"><thead><tr>
+      <th>Datum</th><th>Type</th><th>Actief</th><th class="num">Aantal</th><th class="num">Prijs / bedrag</th>
+      <th>Munt</th><th>Eigenaar</th><th>Broker</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div id="tx-empty" class="empty" hidden><p>Nog geen transacties.</p>
+      <p><button class="btn primary" data-action="new-tx">+ Eerste transactie</button>
+         <button class="btn ghost" data-action="load-example">Voorbeeld laden</button></p>
+      <p class="hint">Of importeer je export van Bolero (Cashbewegingen, CSV) of Saxo (Trades, Excel) met de knop bovenaan.</p></div>
+  </section>
+
+  <section id="tab-activa" class="tab">
+    <div class="toolbar"><h2>Activa</h2></div>
+    <p class="muted">Voor elk actief dat je vóór 1 januari 2026 verwierf, is de waarde per stuk op 31/12/2025 nodig
+      (slotkoers, omgerekend naar EUR). Activa worden automatisch toegevoegd bij een transactie.</p>
+    <div id="asset-missing" class="alert warn" hidden></div>
+    <div class="table-wrap"><table id="asset-table"><thead><tr><th>ISIN/ticker</th><th>Naam</th><th>Type</th><th>Munt</th>
+      <th class="num">Waarde 31/12/2025 (EUR/stuk)</th><th>Bron</th><th></th></tr></thead><tbody></tbody></table></div>
+    <p id="asset-empty" class="empty" hidden>Nog geen activa.</p>
+  </section>
+
+  <section id="tab-instellingen" class="tab">
+    <h2 style="margin-bottom:.8rem">Instellingen</h2>
+    <div class="panel">
+      <h3>Berekeningskeuzes</h3>
+      <label class="field">Historische aankoopprijs (activa van vóór 2026)
+        <select id="s-method"><option value="FIFO">Per lot (FIFO)</option><option value="GEMIDDELD">Gemiddelde van alle aankopen vóór 2026</option></select>
+        <span class="hint">Wettelijk niet volledig uitgeklaard. Het rapport toont het verschil met de andere methode.</span></label>
+      <label class="field">FIFO-toepassing
+        <select id="s-scope"><option value="EIGENAAR">Over alle brokers van de eigenaar</option><option value="BROKER">Per broker apart (zoals de bank rekent)</option></select></label>
+      <button class="btn primary" id="btn-save-settings">Opslaan</button>
+    </div>
+    <div class="panel">
+      <h3>Fiscale parameters per inkomstenjaar</h3>
+      <p class="hint">Voeg een jaar pas toe als het geïndexeerde bedrag officieel bekend is. Tarief als fractie (0.10 = 10%).</p>
+      <div class="table-wrap"><table id="year-table"><thead><tr><th>Jaar</th><th class="num">Tarief</th><th class="num">Basisvrijstelling</th>
+        <th class="num">Overdraagbare schijf</th><th class="num">Geldig (jaar)</th><th>Bron</th><th></th></tr></thead><tbody></tbody></table></div>
+      <p><button class="btn ghost" id="btn-add-year">+ Jaar toevoegen</button></p>
+    </div>
+    <div class="panel">
+      <h3>Ingehouden meerwaardebelasting (opt-in)</h3>
+      <p class="hint">Bedrag dat je broker aan de bron inhield, zoals op je jaaroverzicht.</p>
+      <div class="table-wrap"><table id="withheld-table"><thead><tr><th>Eigenaar</th><th>Jaar</th><th class="num">Ingehouden (EUR)</th><th></th></tr></thead><tbody></tbody></table></div>
+      <form id="withheld-form" class="inline-form">
+        <input name="owner" placeholder="Eigenaar" list="owner-list" aria-label="Eigenaar">
+        <input name="year" type="number" min="2026" value="2026" aria-label="Jaar">
+        <input name="amount" inputmode="decimal" placeholder="Bedrag" aria-label="Bedrag" required>
+        <button class="btn primary">Toevoegen</button>
+      </form>
+    </div>
+    <div class="panel">
+      <h3>Back-up</h3>
+      <p class="hint">Bewaar af en toe een back-up buiten deze pagina. Herstellen vervangt alle huidige gegevens.</p>
+      <div class="row">
+        <button class="btn" id="btn-export">Back-up downloaden</button>
+        <button class="btn ghost" id="btn-copy-backup">Back-up kopiëren</button>
+        <label class="btn ghost">Back-up herstellen uit bestand<input type="file" id="import-file" accept=".json,application/json"></label>
+      </div>
+      <details style="margin-top:.8rem"><summary class="small muted">Of plak een back-up</summary>
+        <textarea id="import-text" placeholder="Plak hier de JSON van een back-up"></textarea>
+        <p><button class="btn" id="btn-import-paste">Herstellen</button></p></details>
+      <p style="margin-top:1rem"><button class="btn small danger" id="btn-reset">Alle gegevens wissen</button></p>
+    </div>
+    <p class="hint">Rekenregels: wet van 6 april 2026 (BS 21 april 2026) en circulaire 2026/C/74. Tarief 10%; vrijstelling 2026 € 10.000;
+      overdracht van het ongebruikte deel van de eerste schijf van € 1.000, 5 jaar geldig; fotowaarde 31/12/2025; hogere bewezen
+      historische prijs tot verkopen t.e.m. 31/12/2030, nooit tot een minderwaarde; minderwaarden enkel binnen hetzelfde jaar;
+      kosten en taksen niet aftrekbaar; FIFO. Delisting: enkel een uitkoop/bod tegen prijs is een overdracht (verkoop);
+      een loutere schrapping of waardeloos worden zonder overdracht is geen belastbaar moment (eigen interpretatie, niet uitdrukkelijk geregeld).</p>
+  </section>
+</main>
+
+<dialog id="tx-dialog">
+  <form id="tx-form" novalidate>
+    <h3 id="tx-title">Nieuwe transactie</h3>
+    <div class="grid">
+      <label class="field">Type <select name="type" required></select></label>
+      <label class="field">Datum <input name="trade_date" type="date" required></label>
+      <label class="field">Actief (ISIN/ticker) <input name="asset" required autocomplete="off" autocapitalize="characters" list="asset-list"></label>
+      <label class="field">Eigenaar <input name="owner" list="owner-list"></label>
+      <label class="field">Broker <input name="broker" list="broker-list" placeholder="bv. Bolero, Saxo"></label>
+      <label class="field g-delist">Soort delisting <select name="delist_mode"></select></label>
+      <label class="field g-qty" id="qty-label">Aantal <input name="quantity" inputmode="decimal"></label>
+      <label class="field g-price" id="price-label">Prijs per stuk <input name="price" inputmode="decimal"></label>
+      <label class="field g-amount">Bedrag <input name="amount" inputmode="decimal"></label>
+      <label class="field g-split">Ratio (nieuwe stuks per oud stuk) <input name="split_ratio" inputmode="decimal" placeholder="4 = 4:1"></label>
+      <label class="field g-ccy">Munt <input name="currency" value="EUR" maxlength="5" autocapitalize="characters"></label>
+      <label class="field g-ccy">Wisselkoers (1 EUR = … munt) <input name="fx_per_eur" value="1" inputmode="decimal"></label>
+      <label class="field g-fees">Kosten <input name="fees" value="0" inputmode="decimal"></label>
+      <label class="field g-fees">Taksen (bv. beurstaks) <input name="taxes" value="0" inputmode="decimal"></label>
+      <label class="field g-reynders">Reynders-bedrag (EUR) <input name="reynders_eur" value="0" inputmode="decimal"></label>
+    </div>
+    <label class="check g-costknown"><input type="checkbox" name="cost_known" checked> Aanschaffingswaarde is gekend</label>
+    <label class="check g-hist"><input type="checkbox" name="historic_proven"> Ik kan deze aankoopprijs bewijzen (hogere historische prijs, verkopen t.e.m. 2030)</label>
+    <p class="alert warn small g-delist" id="delist-hint"></p>
+    <p class="hint g-gift">Bij schenking of erfenis: vul de datum en prijs van de oorspronkelijke eigenaar in.</p>
+    <label class="field">Notitie <input name="note"></label>
+    <p id="tx-error" class="alert error" hidden></p>
+    <div class="actions">
+      <button type="button" class="btn danger left" id="btn-delete-tx" hidden>Verwijderen</button>
+      <button type="button" class="btn ghost" id="btn-cancel">Annuleren</button>
+      <button type="submit" class="btn primary">Opslaan</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="import-dialog" style="width:min(820px,96vw)"><div class="body">
+  <h3 id="imp-title">Export importeren</h3>
+  <p id="imp-summary"></p>
+  <details><summary class="small muted">Overgeslagen regels (geldbewegingen zonder effect op de belasting)</summary><ul id="imp-skipped" class="small"></ul></details>
+  <label class="field" style="max-width:240px;margin-top:.8rem">Eigenaar <input id="imp-owner" list="owner-list"></label>
+  <h3>Posities op 31/12/2025 controleren</h3>
+  <p class="hint">De export bevat geen splitsingen, overnames, naamswijzigingen of effecten die je van een andere bank overzette.
+    Vink uit wat je op 31/12/2025 niet meer had; de tool boekt het dan uit vóór 2026 (geen belastbaar moment).
+    Vul de slotkoers op 31/12/2025 in (EUR per stuk) als je die kent; ze is pas nodig wanneer je het effect verkoopt.</p>
+  <div class="table-wrap"><table id="imp-positions"><thead><tr><th>Bezit</th><th>Effect</th><th class="num">Aantal</th>
+    <th class="col-div">Laatste dividend</th><th class="num">Waarde 31/12/2025</th></tr></thead><tbody></tbody></table></div>
+  <div id="imp-delist-wrap" hidden>
+    <h3>Delistings</h3>
+    <p class="hint">De broker meldt dat de notering van deze effecten stopte terwijl je ze nog had. Kreeg je geld voor je stuks
+      (uitkoopbod, squeeze-out)? Kies dan "Uitkoop" met de prijs per stuk: dat telt als verkoop. Weet je het niet zeker, kies
+      "Enkel schrapping" (geen belastbaar moment) en pas het later aan.</p>
+    <div class="table-wrap"><table id="imp-delist"><thead><tr><th>Toevoegen</th><th>Effect</th><th>Datum</th><th class="num">Stuks</th>
+      <th>Soort</th><th class="num">Uitkoopprijs</th></tr></thead><tbody></tbody></table></div>
+  </div>
+  <details id="imp-warn-wrap" style="margin-top:.8rem"><summary class="small">Aandachtspunten (<span id="imp-warn-count"></span>)</summary>
+    <ul id="imp-warnings" class="small"></ul></details>
+  <p class="hint">Aankopen van vóór 2026 worden gemarkeerd als "historische prijs bewijsbaar": de afrekeningen van je broker gelden als bewijs. Pas dat per transactie aan als nodig.</p>
+  <div class="actions"><button class="btn ghost" id="imp-cancel">Annuleren</button><button class="btn primary" id="imp-confirm">Importeren</button></div>
+</div></dialog>
+
+<dialog id="confirm-dialog" style="width:min(420px,92vw)"><div class="body">
+  <p id="confirm-text" style="margin-top:0"></p>
+  <div class="actions"><button class="btn ghost" id="confirm-no">Annuleren</button><button class="btn primary" id="confirm-yes">Bevestigen</button></div>
+</div></dialog>
+
+<dialog id="text-dialog"><div class="body">
+  <h3 id="text-title"></h3>
+  <p class="hint">Selecteer en kopieer de tekst hieronder.</p>
+  <textarea id="text-body" readonly style="min-height:240px"></textarea>
+  <div class="actions"><button class="btn primary" id="text-close">Sluiten</button></div>
+</div></dialog>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<datalist id="asset-list"></datalist><datalist id="owner-list"></datalist>
+<datalist id="broker-list"><option value="Bolero"><option value="Saxo"></datalist>
+
+<script>/* Rekenkern meerwaardebelasting (algemeen regime) — JavaScript-versie van engine/calculator.py.
+ * Exacte decimale rekenkunde met BigInt (20 decimalen intern, afronding half-up zoals Python ROUND_HALF_UP).
+ * Geen fiscaal advies. */
+(function (root) {
+  "use strict";
+
+  // ------------------------------------------------------------ Decimal
+  const SCALE = 20n;
+  const F = 10n ** SCALE;
+
+  function divRound(n, d) {
+    if (d === 0n) throw new Error("Deling door nul");
+    const neg = (n < 0n) !== (d < 0n);
+    const a = n < 0n ? -n : n, b = d < 0n ? -d : d;
+    let q = a / b;
+    if (2n * (a % b) >= b) q += 1n;
+    return neg ? -q : q;
+  }
+
+  class Dec {
+    constructor(raw) { this.raw = raw; Object.freeze(this); }
+    static parse(v) {
+      if (v instanceof Dec) return v;
+      if (typeof v === "number") {
+        if (!Number.isInteger(v)) throw new Error("Gebruik strings voor niet-gehele getallen");
+        return new Dec(BigInt(v) * F);
+      }
+      const s = String(v ?? "").trim().replace(/\s/g, "").replace(",", ".");
+      const m = /^([+-])?(\d*)(?:\.(\d*))?$/.exec(s);
+      if (!m || ((m[2] || "") === "" && (m[3] || "") === "")) throw new Error(`Geen geldig getal: ${v}`);
+      const frac = m[3] || "";
+      const full = BigInt((m[2] || "0") + frac);
+      const exp = BigInt(frac.length);
+      let raw = exp <= SCALE ? full * 10n ** (SCALE - exp) : divRound(full, 10n ** (exp - SCALE));
+      if (m[1] === "-") raw = -raw;
+      return new Dec(raw);
+    }
+    add(o) { return new Dec(this.raw + D(o).raw); }
+    sub(o) { return new Dec(this.raw - D(o).raw); }
+    mul(o) { return new Dec(divRound(this.raw * D(o).raw, F)); }
+    div(o) { return new Dec(divRound(this.raw * F, D(o).raw)); }
+    neg() { return new Dec(-this.raw); }
+    cmp(o) { const r = D(o).raw; return this.raw < r ? -1 : this.raw > r ? 1 : 0; }
+    lt(o) { return this.cmp(o) < 0; } lte(o) { return this.cmp(o) <= 0; }
+    gt(o) { return this.cmp(o) > 0; } gte(o) { return this.cmp(o) >= 0; }
+    eq(o) { return this.cmp(o) === 0; }
+    isZero() { return this.raw === 0n; }
+    round(places = 2) { const u = 10n ** (SCALE - BigInt(places)); return new Dec(divRound(this.raw, u) * u); }
+    toFixed(places = 2) {
+      const r = this.round(places).raw;
+      const neg = r < 0n, a = neg ? -r : r;
+      const ip = a / F, fp = (a % F).toString().padStart(Number(SCALE), "0").slice(0, places);
+      return (neg && a !== 0n ? "-" : "") + ip.toString() + (places ? "." + fp : "");
+    }
+    toString() {
+      const neg = this.raw < 0n, a = neg ? -this.raw : this.raw;
+      const ip = a / F, fp = (a % F).toString().padStart(Number(SCALE), "0").replace(/0+$/, "");
+      return (neg ? "-" : "") + ip.toString() + (fp ? "." + fp : "");
+    }
+    toJSON() { return this.toString(); }
+    static max(a, b) { return a.gte(b) ? a : b; }
+    static min(a, b) { return a.lte(b) ? a : b; }
+  }
+  function D(v) { return Dec.parse(v); }
+  const ZERO = D(0), ONE = D(1);
+  const money = x => x.round(2);
+  const sum = arr => arr.reduce((a, b) => a.add(b), ZERO);
+
+  // ------------------------------------------------------------ constanten
+  const TxType = ["BUY", "SELL", "SPLIT", "DIVIDEND", "FEE", "TRANSFER_IN", "GIFT_IN", "INHERIT_IN", "DELISTING"];
+  const DelistModes = ["NOTERING", "UITKOOP", "WAARDELOOS"];
+  const ACQ = new Set(["BUY", "TRANSFER_IN", "GIFT_IN", "INHERIT_IN"]);
+  const START = "2026-01-01";
+
+  function defaultConfig() {
+    return {
+      years: { 2026: { rate: D("0.10"), baseExemption: D("10000"), carrySlice: D("1000"), carryValidityYears: 5,
+                       source: "Wet 6.4.2026 (BS 21.4.2026); vrijstelling 2026 = 10.000 EUR" } },
+      historicUntil: "2030-12-31",
+      historicMethod: "FIFO",       // of "GEMIDDELD"
+      fifoScope: "EIGENAAR",        // of "BROKER"
+    };
+  }
+  function yearCfg(cfg, y) {
+    const c = cfg.years[y];
+    if (!c) throw new Error(`Geen fiscale parameters voor inkomstenjaar ${y}. Voeg het geïndexeerde vrijstellingsbedrag toe aan de configuratie.`);
+    return c;
+  }
+
+  /** Normaliseer een transactie (strings/numbers -> Dec, defaults). */
+  function tx(t) {
+    return {
+      trade_date: t.trade_date, type: t.type, asset: t.asset,
+      quantity: D(t.quantity ?? 0), price: D(t.price ?? 0), currency: t.currency || "EUR",
+      fx_per_eur: D(t.fx_per_eur ?? 1), fees: D(t.fees ?? 0), taxes: D(t.taxes ?? 0),
+      owner: t.owner || "default", broker: t.broker || "",
+      split_ratio: t.split_ratio != null && t.split_ratio !== "" ? D(t.split_ratio) : null,
+      historic_proven: !!t.historic_proven, cost_known: t.cost_known !== false,
+      reynders_eur: D(t.reynders_eur ?? 0), amount: D(t.amount ?? 0), source: t.source || "",
+      delist_mode: t.delist_mode || "",
+    };
+  }
+  function toEur(t, amount) {
+    if (!t.fx_per_eur.gt(ZERO)) throw new Error(`Ongeldige wisselkoers in ${t.source}`);
+    return amount.div(t.fx_per_eur);
+  }
+
+  // ------------------------------------------------------------ lots en verkopen
+  const poolKey = (t, scope) => scope === "BROKER" ? `${t.owner}\u0000${t.broker}\u0000${t.asset}` : `${t.owner}\u0000${t.asset}`;
+  const isPre = lot => lot.acquired < START;
+
+  function historicUnit(lot, pool, method) {
+    if (!isPre(lot)) return null;
+    if (method === "FIFO") return lot.historicProven && lot.costKnown ? lot.unitCost : null;
+    const pre = pool.filter(isPre);
+    if (!pre.length || pre.some(l => !(l.historicProven && l.costKnown))) return null;
+    const q = sum(pre.map(l => l.origQuantity));
+    if (q.isZero()) return null;
+    return sum(pre.map(l => l.origQuantity.mul(l.unitCost))).div(q);
+  }
+
+  function line(lot, qty, proceeds, basis, basisUsed, result, note = "") {
+    return { lotId: lot ? lot.lotId : null, acquired: lot ? lot.acquired : null, quantity: qty,
+             proceeds_eur: proceeds, basis_eur: basis, basis_used: basisUsed, result_eur: result, note };
+  }
+
+  function lineForLot(lot, qty, proceeds, saleDate, pool, cfg) {
+    if (!isPre(lot)) {
+      if (!lot.costKnown) return line(lot, qty, proceeds, ZERO, "ONBEKEND", proceeds, "Aanschaffingswaarde niet gekend: volledige prijs belastbaar");
+      const basis = money(qty.mul(lot.unitCost));
+      return line(lot, qty, proceeds, basis, "AANKOOP", proceeds.sub(basis));
+    }
+    if (!lot.unitRef) throw new Error(`Geen waarde op 31/12/2025 voor ${lot.asset} (nodig voor lot van ${lot.acquired}).`);
+    const ref = money(qty.mul(lot.unitRef));
+    if (proceeds.lt(ref)) return line(lot, qty, proceeds, ref, "REF_31_12_2025", proceeds.sub(ref));
+    const hu = saleDate <= cfg.historicUntil ? historicUnit(lot, pool, cfg.historicMethod) : null;
+    if (hu) {
+      const hist = money(qty.mul(hu));
+      if (hist.gt(ref)) {
+        let note = "Hogere historische prijs gebruikt" + (proceeds.lt(hist) ? " (herleid tot 0)" : "");
+        if (cfg.historicMethod === "GEMIDDELD") note += " [gemiddelde methode]";
+        return line(lot, qty, proceeds, hist, "HISTORISCH", Dec.max(ZERO, proceeds.sub(hist)), note);
+      }
+    }
+    return line(lot, qty, proceeds, ref, "REF_31_12_2025", proceeds.sub(ref));
+  }
+
+  function processSale(t, pool, cfg) {
+    if (!t.quantity.gt(ZERO)) throw new Error(`Aantal moet positief zijn: ${t.source}`);
+    const total = money(toEur(t, t.quantity.mul(t.price)));
+    const sale = { trade_date: t.trade_date, owner: t.owner, broker: t.broker, asset: t.asset, quantity: t.quantity,
+                   proceeds_eur: total, fees_eur: money(toEur(t, t.fees.add(t.taxes))), lines: [],
+                   reynders_deduction_eur: ZERO, warnings: [], source: t.source, kind: "VERKOOP" };
+    let remaining = t.quantity, allocated = ZERO;
+    for (const lot of pool) {
+      if (!remaining.gt(ZERO)) break;
+      if (lot.quantity.isZero()) continue;
+      const q = Dec.min(remaining, lot.quantity);
+      remaining = remaining.sub(q);
+      const part = remaining.isZero() ? total.sub(allocated) : money(total.mul(q).div(t.quantity));
+      allocated = allocated.add(part);
+      sale.lines.push(lineForLot(lot, q, part, t.trade_date, pool, cfg));
+      lot.quantity = lot.quantity.sub(q);
+    }
+    if (remaining.gt(ZERO)) {
+      const part = total.sub(allocated);
+      sale.lines.push(line(null, remaining, part, ZERO, "ONBEKEND", part, "Geen aankoop gevonden: aanschaffingswaarde 0"));
+      sale.warnings.push(`${remaining} stuks zonder gekende aankoop; volledige opbrengst (${part.toFixed(2)} EUR) als meerwaarde behandeld.`);
+    }
+    if (!t.reynders_eur.isZero()) {
+      const gross = sum(sale.lines.map(l => l.result_eur));
+      const ded = Dec.min(money(t.reynders_eur), Dec.max(gross, ZERO));
+      sale.reynders_deduction_eur = ded;
+      if (ded.lt(t.reynders_eur)) sale.warnings.push("Reynders-aftrek beperkt tot de positieve meerwaarde van deze verkoop.");
+    }
+    if (sale.lines.some(l => l.basis_used === "HISTORISCH"))
+      sale.warnings.push("Historische aankoopprijs gebruikt: zelf inroepen in de aangifte en bewijsstukken bewaren.");
+    sale.result_eur = sum(sale.lines.map(l => l.result_eur)).sub(sale.reynders_deduction_eur);
+    return sale;
+  }
+
+  // ------------------------------------------------------------ hoofdfunctie
+  /** transactions: array (plain objects), refValues: {asset: "80.00"}, withheld: {"owner|year": "360"} */
+  function calculate(transactions, refValues, cfg, withheld = {}, throughYear = null) {
+    cfg = cfg || defaultConfig();
+    const txs = transactions.map((t, i) => ({ ...tx(t), _i: i }))
+      .sort((a, b) => a.trade_date < b.trade_date ? -1 : a.trade_date > b.trade_date ? 1 : a._i - b._i);
+    const pools = new Map(), sales = [], dividends = new Map(), events = [];
+    const pool = k => { if (!pools.has(k)) pools.set(k, []); return pools.get(k); };
+    let nextId = 1;
+
+    for (const t of txs) {
+      if (!TxType.includes(t.type)) throw new Error(`Onbekend transactietype: ${t.type}`);
+      const p = pool(poolKey(t, cfg.fifoScope));
+      if (ACQ.has(t.type)) {
+        if (!t.quantity.gt(ZERO)) throw new Error(`Aantal moet positief zijn: ${t.source}`);
+        const lot = { lotId: nextId++, owner: t.owner, broker: t.broker, asset: t.asset, acquired: t.trade_date,
+                      quantity: t.quantity, origQuantity: t.quantity,
+                      unitCost: t.cost_known ? toEur(t, t.price) : ZERO,
+                      historicProven: t.historic_proven, costKnown: t.cost_known, unitRef: null, source: t.source };
+        // fotowaarde pas vereist als dit lot ná 2025 verkocht wordt
+        if (isPre(lot) && refValues[t.asset] != null && refValues[t.asset] !== "") lot.unitRef = D(refValues[t.asset]);
+        p.push(lot);
+      } else if (t.type === "SPLIT") {
+        const r = t.split_ratio;
+        if (!r || !r.gt(ZERO)) throw new Error(`Split zonder geldige ratio: ${t.source}`);
+        for (const lot of p) {
+          lot.quantity = lot.quantity.mul(r); lot.origQuantity = lot.origQuantity.mul(r);
+          lot.unitCost = lot.unitCost.div(r); if (lot.unitRef) lot.unitRef = lot.unitRef.div(r);
+        }
+      } else if (t.type === "SELL") {
+        if (t.trade_date < START) {
+          consume(p, t.quantity);
+        } else sales.push(processSale(t, p, cfg));
+      } else if (t.type === "DELISTING") {
+        processDelisting(t, p, cfg, sales, events);
+      } else if (t.type === "DIVIDEND") {
+        const k = `${t.owner}|${t.trade_date.slice(0, 4)}`;
+        dividends.set(k, (dividends.get(k) || ZERO).add(toEur(t, t.amount)));
+      }
+    }
+    const years = summarize(sales, dividends, cfg, withheld, throughYear);
+    const warnings = sales.flatMap(s => s.warnings.map(w => `${s.trade_date} ${s.asset}: ${w}`))
+      .concat(events.filter(e => e.kind !== "UITKOOP").map(e => `${e.trade_date} ${e.asset}: ${e.note}`));
+    return { sales, years, warnings, events,
+             disclaimer: "Deze berekening is een hulpmiddel en geen fiscaal advies. Controleer altijd met de officiële bronnen (FOD Financiën) of een adviseur." };
+  }
+
+  const DELIST_NOTES = {
+    NOTERING: "Schrapping van de notering is geen overdracht en dus geen belastbaar moment. " +
+      "De positie blijft open met dezelfde aanschaffingswaarde; registreer een latere verkoop of uitkoop apart.",
+    UITKOOP: "Uitkoop/bod bij delisting: behandeld als overdracht ten bezwarende titel (verkoop).",
+    WAARDELOOS: "Waardeloos geworden zonder overdracht: de belasting viseert overdrachten ten bezwarende titel, " +
+      "dus de tool boekt geen minderwaarde. Een overdracht voor een symbolische prijs (bv. aan je broker) kan wel " +
+      "een minderwaarde opleveren: registreer die dan als verkoop. Wettelijk niet uitgeklaard; vraag advies.",
+  };
+
+  function consume(pool, qty) {
+    for (const lot of pool) { if (!qty.gt(ZERO)) break; const u = Dec.min(qty, lot.quantity); lot.quantity = lot.quantity.sub(u); qty = qty.sub(u); }
+  }
+
+  function processDelisting(t, pool, cfg, sales, events) {
+    const mode = t.delist_mode || "NOTERING";
+    if (!DelistModes.includes(mode)) throw new Error(`Onbekende soort delisting: ${mode} (${t.source})`);
+    const held = sum(pool.map(l => l.quantity));
+    let note = DELIST_NOTES[mode];
+    if (mode === "UITKOOP") {
+      const qty = t.quantity.gt(ZERO) ? t.quantity : held;
+      if (!qty.gt(ZERO)) note = "Uitkoop geregistreerd, maar er zijn geen stuks in bezit: geen verkoop berekend.";
+      else if (t.trade_date < START) consume(pool, qty);
+      else {
+        const sale = processSale({ ...t, type: "SELL", quantity: qty }, pool, cfg);
+        sale.kind = "UITKOOP";
+        sale.warnings.unshift(note);
+        sales.push(sale);
+      }
+    } else if (!held.gt(ZERO)) note = `Geen stuks in bezit op het moment van de delisting. ${note}`;
+    events.push({ trade_date: t.trade_date, owner: t.owner, broker: t.broker, asset: t.asset, kind: mode,
+                  quantity_held: held, note, source: t.source });
+  }
+
+  function summarize(sales, dividends, cfg, withheld, throughYear) {
+    const wk = Object.keys(withheld).map(k => { const i = k.lastIndexOf("|"); return [k.slice(0, i), Number(k.slice(i + 1))]; });
+    const dk = [...dividends.keys()].map(k => { const i = k.lastIndexOf("|"); return [k.slice(0, i), Number(k.slice(i + 1))]; });
+    const owners = [...new Set([...sales.map(s => s.owner), ...wk.map(x => x[0]), ...dk.map(x => x[0])])].sort();
+    if (!owners.length) return [];
+    const first = 2026;
+    let last = Math.max(first, ...sales.map(s => Number(s.trade_date.slice(0, 4))), ...wk.map(x => x[1]));
+    if (throughYear) last = Math.max(last, throughYear);
+
+    const out = [];
+    for (const owner of owners) {
+      let carries = new Map();
+      for (let year = first; year <= last; year++) {
+        const yc = yearCfg(cfg, year);
+        const own = sales.filter(s => s.owner === owner && Number(s.trade_date.slice(0, 4)) === year);
+        const y = { owner, year, sale_count: own.length, gains_eur: ZERO, losses_eur: ZERO, carry_used_eur: ZERO };
+        for (const s of own) { if (s.result_eur.gte(ZERO)) y.gains_eur = y.gains_eur.add(s.result_eur); else y.losses_eur = y.losses_eur.add(s.result_eur); }
+        const total = y.gains_eur.add(y.losses_eur);
+        y.net_eur = Dec.max(total, ZERO);
+        y.lost_losses_eur = Dec.min(total, ZERO);
+
+        carries = new Map([...carries].filter(([cy]) => year - cy <= yc.carryValidityYears));
+        y.exemption_available_eur = yc.baseExemption.add(sum([...carries.values()]));
+        let remaining = y.net_eur;
+        for (const cy of [...carries.keys()].sort((a, b) => a - b)) {
+          const use = Dec.min(remaining, carries.get(cy));
+          carries.set(cy, carries.get(cy).sub(use));
+          y.carry_used_eur = y.carry_used_eur.add(use);
+          remaining = remaining.sub(use);
+        }
+        carries = new Map([...carries].filter(([, a]) => a.gt(ZERO)));
+        y.base_used_eur = Dec.min(remaining, yc.baseExemption);
+        remaining = remaining.sub(y.base_used_eur);
+        y.carry_generated_eur = yc.carrySlice.sub(Dec.min(yc.carrySlice, y.base_used_eur));
+        if (y.carry_generated_eur.gt(ZERO)) carries.set(year, y.carry_generated_eur);
+        y.carry_detail = Object.fromEntries(carries);
+        y.taxable_eur = remaining;
+        y.tax_eur = money(remaining.mul(yc.rate));
+        y.withheld_eur = money(D(withheld[`${owner}|${year}`] ?? 0));
+        y.refund_eur = y.withheld_eur.sub(y.tax_eur);
+        y.dividends_eur = money(dividends.get(`${owner}|${year}`) || ZERO);
+        out.push(y);
+      }
+    }
+    return out;
+  }
+
+  /** Posities per eigenaar/actief na alle transacties t.e.m. `date` (FIFO-verbruik zoals in calculate). */
+  function holdingsAt(transactions, date, cfg) {
+    cfg = cfg || defaultConfig();
+    const txs = transactions.map((t, i) => ({ ...tx(t), _i: i })).filter(t => t.trade_date <= date)
+      .sort((a, b) => a.trade_date < b.trade_date ? -1 : a.trade_date > b.trade_date ? 1 : a._i - b._i);
+    const pools = new Map();
+    for (const t of txs) {
+      const k = poolKey(t, cfg.fifoScope);
+      if (!pools.has(k)) pools.set(k, { owner: t.owner, asset: t.asset, lots: [] });
+      const p = pools.get(k).lots;
+      if (ACQ.has(t.type)) p.push({ quantity: t.quantity });
+      else if (t.type === "SPLIT" && t.split_ratio && t.split_ratio.gt(ZERO)) p.forEach(l => { l.quantity = l.quantity.mul(t.split_ratio); });
+      else if (t.type === "SELL" || (t.type === "DELISTING" && t.delist_mode === "UITKOOP")) {
+        let q = t.quantity.gt(ZERO) ? t.quantity : sum(p.map(l => l.quantity));
+        for (const l of p) { if (!q.gt(ZERO)) break; const u = Dec.min(q, l.quantity); l.quantity = l.quantity.sub(u); q = q.sub(u); }
+      }
+    }
+    const out = new Map();
+    for (const { owner, asset, lots } of pools.values()) {
+      const q = sum(lots.map(l => l.quantity)), k = `${owner}\u0000${asset}`;
+      out.set(k, { owner, asset, quantity: (out.get(k)?.quantity || ZERO).add(q) });
+    }
+    return [...out.values()].filter(h => h.quantity.gt(ZERO));
+  }
+
+  function compareMethods(transactions, refValues, cfg, withheld, throughYear) {
+    const res = {};
+    for (const m of ["FIFO", "GEMIDDELD"]) res[m] = calculate(transactions, refValues, { ...cfg, historicMethod: m }, withheld, throughYear);
+    return res;
+  }
+
+  const api = { Dec, D, ZERO, ONE, money, TxType, DelistModes, ACQ, defaultConfig, calculate, compareMethods, holdingsAt };
+  if (typeof module !== "undefined" && module.exports) module.exports = api; else root.MWB = api;
+})(typeof window !== "undefined" ? window : globalThis);
+</script>
+<script>/* Importer voor de Bolero-export "Cashbewegingen" (CSV).
+ * Zet aankopen, verkopen, inschrijvingen en dividenden om naar transacties voor de rekenkern.
+ * Het bestand bevat geen ISIN's, splitsingen, overnames of overboekingen van effecten:
+ * het importscherm laat de gebruiker daarom de posities op 31/12/2025 bevestigen. */
+(function (root) {
+  "use strict";
+  const M = typeof module !== "undefined" && module.exports ? require("./engine.js") : root.MWB;
+  const { D, ZERO } = M;
+
+  // ------------------------------------------------------------ CSV
+  function parseCsv(text, delim = ",") {
+    const rows = []; let row = [], field = "", q = false;
+    text = text.replace(/^﻿/, "");
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (q) {
+        if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else q = false; }
+        else field += c;
+      } else if (c === '"') q = true;
+      else if (c === delim) { row.push(field); field = ""; }
+      else if (c === "\n" || c === "\r") {
+        if (c === "\r" && text[i + 1] === "\n") i++;
+        row.push(field); rows.push(row); row = []; field = "";
+      } else field += c;
+    }
+    if (field !== "" || row.length) { row.push(field); rows.push(row); }
+    return rows;
+  }
+
+  // Belgische notatie: "1.601,95" / "-959,45" / "4"
+  function bnum(s) {
+    s = String(s ?? "").trim();
+    if (!s) return null;
+    return D(s.replace(/\./g, "").replace(",", "."));
+  }
+  const isoDate = d => `${d.slice(6, 10)}-${d.slice(3, 5)}-${d.slice(0, 2)}`;
+
+  // ------------------------------------------------------------ namen en munten
+  const EXCH_CCY = {
+    BR: "EUR", PA: "EUR", AS: "EUR", FR: "EUR", MI: "EUR", LS: "EUR", MC: "EUR", DE: "EUR", VI: "EUR", HE: "EUR",
+    DU: "EUR", XE: "EUR", IR: "EUR", NY: "USD", NA: "USD", OS: "NOK", ST: "SEK", CO: "DKK", SW: "CHF", MO: "CAD", TO: "CAD",
+    LO: null, // Londen: GBP of USD (GDR's), afgeleid uit het bedrag
+  };
+
+  /** "PENNANTPARK FLOATING RATE CAPIT.(NY" -> { id: "PENNANTPARK FLOATING RATE CAPIT. (NY)", exch: "NY" } */
+  function assetName(raw) {
+    let s = String(raw).replace(/\s+/g, " ").trim();
+    const m = /\s*\((\w\w)\)?\s*$/.exec(s);
+    let exch = null;
+    if (m) { exch = m[1].toUpperCase(); s = s.slice(0, m.index).trim() + ` (${exch})`; }
+    return { id: s.toUpperCase(), exch };
+  }
+  /** Sleutel om dividendnamen ("CP BENETEAU S.A. (PA) 17.06.26") aan handelsnamen te koppelen. */
+  function nameKey(raw) {
+    let n = String(raw).toUpperCase().replace(/^CP\s+/, "").replace(/\s+\d\d\.\d\d\.\d\d\s*$/, "");
+    n = n.replace(/\s*\(\w\w\)?\s*$/, "");
+    return n.replace(/[^A-Z0-9]/g, "").slice(0, 9);
+  }
+  function dividendAssetName(raw) {
+    let s = String(raw).replace(/\s+/g, " ").trim().replace(/^CP\s+/i, "").replace(/\s+\d\d\.\d\d\.\d\d$/, "");
+    return assetName(s).id;
+  }
+
+  const TRADE = /^(Aankoop Online|Aankoop|Verkoop Online|Verkoop|Inschrijving)\s+(.+)$/i;
+  const DIVIDEND = /^Uitbetaling (dividenden|effecten)\s+(.+)$/i;
+  const SKIP = [
+    [/^Wisseltransactie/i, "Wisseltransacties"],
+    [/^Overschrijving naar klant/i, "Overschrijvingen naar je rekening"],
+    [/^Provisionering rekening klant/i, "Stortingen op je Bolero-rekening"],
+    [/^Terugstorting/i, "Terugstortingen (kosten)"],
+    [/^Taksrecuperatie/i, "Recuperatie buitenlandse taks"],
+    [/^Kost igv corporate actions/i, "Kosten corporate actions"],
+  ];
+
+  /** FNV-1a 64-bit als korte, stabiele sleutel voor herimport. */
+  function fnv64(str) {
+    let h = 0xcbf29ce484222325n;
+    for (const ch of new TextEncoder().encode(str)) { h ^= BigInt(ch); h = (h * 0x100000001b3n) & 0xffffffffffffffffn; }
+    return h.toString(16).padStart(16, "0");
+  }
+
+  // ------------------------------------------------------------ hoofdfunctie
+  function parseBolero(text, { owner = "ik", broker = "Bolero", fileName = "bolero.csv" } = {}) {
+    const rows = parseCsv(text);
+    const hIdx = rows.findIndex(r => r.some(c => c.trim() === "Datum transactie"));
+    if (hIdx < 0) throw new Error("Dit lijkt geen Bolero-export van cashbewegingen: de kolom 'Datum transactie' ontbreekt.");
+    const h = rows[hIdx].map(c => c.trim());
+    const col = name => h.indexOf(name);
+    const C = {
+      date: col("Datum transactie"), desc: col("Transactie"), amount: col("Bedrag"), qty: col("Aantal"), price: col("Prijs"),
+      rv: col("Roerende voorheffing (EUR)"), pl: col("Winst/verlies"), mwb: col("Meerwaardebelasting"),
+    };
+    C.ccy = h.indexOf("Munt", C.amount);
+    for (const [k, v] of Object.entries(C)) if (v < 0) throw new Error(`Kolom ontbreekt in de Bolero-export: ${k}`);
+
+    // regels met een datum, chronologisch (de export is aflopend; volgorde binnen een dag omkeren)
+    const lines = [];
+    rows.forEach((r, i) => {
+      const d = (r[C.date] || "").trim();
+      if (/^\d\d\/\d\d\/\d{4}$/.test(d)) lines.push({ n: i + 1, r, date: isoDate(d), desc: (r[C.desc] || "").trim() });
+    });
+    lines.reverse();
+
+    // wisselkoersen uit wisseltransacties (paren EUR <-> vreemde munt op dezelfde dag)
+    const fxObs = []; // {date, ccy, rate}
+    const wissel = lines.filter(l => /^Wisseltransactie/i.test(l.desc));
+    for (let i = 0; i + 1 < wissel.length; i++) {
+      const a = wissel[i], b = wissel[i + 1];
+      if (a.date !== b.date) continue;
+      const ca = a.r[C.ccy].trim(), cb = b.r[C.ccy].trim(), va = bnum(a.r[C.amount]), vb = bnum(b.r[C.amount]);
+      if (!va || !vb || va.isZero() || vb.isZero() || (ca === "EUR") === (cb === "EUR")) continue;
+      const [eurV, fxV, ccy] = ca === "EUR" ? [va, vb, cb] : [vb, va, ca];
+      if (eurV.lt(0) === fxV.lt(0)) continue; // een wissel heeft tegengestelde tekens
+      const absE = eurV.lt(0) ? eurV.neg() : eurV, absF = fxV.lt(0) ? fxV.neg() : fxV;
+      if (absE.lt("1")) continue; // afrondingsresten
+      fxObs.push({ date: a.date, ccy, rate: absF.div(absE) });
+      i++;
+    }
+    const dayNum = d => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)) / 864e5;
+    function fxFor(ccy, date) {
+      let best = null;
+      for (const o of fxObs) if (o.ccy === ccy) {
+        const dist = Math.abs(dayNum(o.date) - dayNum(date));
+        if (!best || dist < best.dist) best = { rate: o.rate, dist, date: o.date };
+      }
+      return best;
+    }
+
+    const out = [], warnings = [], fxWarnings = [], skipped = {}, refHints = {}, assets = {};
+    const seen = new Map();
+    const importId = l => {
+      const base = `bolero|${l.date}|${l.desc}|${l.r[C.amount]}|${l.r[C.qty]}|${l.r[C.price]}`;
+      const k = (seen.get(base) || 0) + 1; seen.set(base, k);
+      return "b:" + fnv64(`${base}|${k}`);
+    };
+    const tradeKeys = new Map(); // nameKey -> asset id
+    const storno = []; // te annuleren regels
+
+    for (const l of lines) {
+      const src = `${fileName}:${l.n}`;
+      const amount = bnum(l.r[C.amount]), amtCcy = (l.r[C.ccy] || "").trim() || "EUR";
+      const qty = bnum(l.r[C.qty]), price = bnum(l.r[C.price]);
+      let m;
+      if ((m = TRADE.exec(l.desc))) {
+        const verb = m[1].toLowerCase(), isSell = verb.startsWith("verkoop");
+        const { id, exch } = assetName(m[2]);
+        tradeKeys.set(nameKey(m[2]), id);
+        if (!qty || !qty.gt(ZERO) || price == null || amount == null) { warnings.push(`${src}: ${l.desc} – aantal, prijs of bedrag ontbreekt, overgeslagen.`); continue; }
+        // storno: aankoop met positief bedrag of verkoop met negatief bedrag
+        if ((!isSell && amount.gt(ZERO)) || (isSell && amount.lt(ZERO))) { storno.push({ l, id, isSell, qty, amount }); continue; }
+
+        const gross = qty.mul(price), net = amount.lt(ZERO) ? amount.neg() : amount;
+        let ccy = exch ? EXCH_CCY[exch] : undefined, fx = D(1), note = [];
+        if (ccy === "EUR") { /* prijs in EUR, ook als het bedrag in een andere munt geboekt staat */ }
+        else if (amtCcy === "EUR") {
+          const ratio = gross.div(net); // vreemde munt per EUR, incl. kosten -> schatting
+          const dev = ratio.sub(1);
+          if (ccy === undefined && dev.lt("0.06") && dev.gt("-0.06")) ccy = "EUR";
+          else {
+            if (ccy == null) ccy = exch === "LO" ? (ratio.lt(1) ? "GBP" : "USD") : "EUR";
+            if (ccy !== "EUR") { fx = ratio.round(6); note.push(`wisselkoers geschat uit het nettobedrag (incl. kosten): ${fx}`); }
+          }
+        } else {
+          if (ccy == null) ccy = amtCcy;
+          const f = fxFor(ccy, l.date);
+          if (f) { fx = f.rate.round(6); if (f.dist > 7) note.push(`wisselkoers van ${f.date} (geen wissel binnen 7 dagen)`); }
+          else { fx = null; }
+        }
+        if (fx === null) { warnings.push(`${src}: ${l.desc} – geen wisselkoers ${ccy}/EUR gevonden, overgeslagen.`); continue; }
+        // kosten (enkel exact als bedrag en prijs in dezelfde munt staan)
+        let fees = ZERO;
+        if (ccy === amtCcy) { const diff = isSell ? gross.sub(net) : net.sub(gross); if (diff.gt(ZERO)) fees = diff.round(2); }
+        if (ccy !== "EUR" && fx && note.length) fxWarnings.push({ asset: id, date: l.date, text: `${src}: ${id} (${l.date}) – ${note[0]}.` });
+
+        const t = {
+          type: isSell ? "SELL" : "BUY", trade_date: l.date, asset: id, quantity: qty.toString(), price: price.toString(),
+          currency: ccy, fx_per_eur: fx.toString(), fees: fees.toString(), taxes: "0", owner, broker,
+          historic_proven: !isSell && l.date < "2026-01-01", cost_known: true, reynders_eur: "0", amount: "0", split_ratio: null,
+          note: [verb === "inschrijving" ? "inschrijving" : "", ...note].filter(Boolean).join("; "),
+          import_id: importId(l), import_source: src,
+        };
+        const pl = bnum(l.r[C.pl]), mwb = bnum(l.r[C.mwb]);
+        if (isSell && pl != null) { t.bolero_result = pl.toString(); if (mwb != null) t.bolero_tax = mwb.toString(); }
+        assets[id] ??= { currency: ccy };
+        out.push(t);
+      } else if ((m = DIVIDEND.exec(l.desc))) {
+        if (amount == null) continue;
+        const name = m[2];
+        const id = tradeKeys.get(nameKey(name)) || dividendAssetName(name);
+        if (amount.lt(ZERO)) { storno.push({ l, id, dividend: true, amount }); continue; }
+        let fx = D(1);
+        if (amtCcy !== "EUR") { const f = fxFor(amtCcy, l.date); fx = f ? f.rate.round(6) : null; }
+        if (fx === null) { warnings.push(`${src}: dividend ${name} in ${amtCcy} zonder wisselkoers, overgeslagen.`); continue; }
+        const rv = bnum(l.r[C.rv]);
+        out.push({
+          type: "DIVIDEND", trade_date: l.date, asset: id, amount: amount.toString(), currency: amtCcy, fx_per_eur: fx.toString(),
+          quantity: "0", price: "0", fees: "0", taxes: "0", owner, broker, historic_proven: false, cost_known: true, reynders_eur: "0",
+          split_ratio: null, note: `netto${rv ? `; roerende voorheffing € ${rv}` : ""}${m[1].toLowerCase() === "effecten" ? "; coupon/recht" : ""}`,
+          import_id: importId(l), import_source: src,
+        });
+      } else if (/^Inboeking corporate action/i.test(l.desc)) {
+        skipped["Corporate actions"] = (skipped["Corporate actions"] || 0) + 1;
+        warnings.push(`${src}: ${l.desc} – corporate action (bv. overname of omruiling) staat niet volledig in de export. Controleer de betrokken posities.`);
+      } else {
+        const s = SKIP.find(([re]) => re.test(l.desc));
+        const label = s ? s[1] : "Onbekende regels";
+        skipped[label] = (skipped[label] || 0) + 1;
+        if (!s) warnings.push(`${src}: onbekend type '${l.desc}', overgeslagen.`);
+      }
+    }
+
+    // storno's: telkens één overeenkomstige regel annuleren
+    for (const s of storno) {
+      const want = s.amount.lt(ZERO) ? s.amount.neg() : s.amount;
+      const idx = out.findIndex(t => t.asset === s.id && t.trade_date === s.l.date && !t._cancelled && (s.dividend
+        ? t.type === "DIVIDEND" && D(t.amount).eq(want)
+        : t.type === (s.isSell ? "SELL" : "BUY") && D(t.quantity).eq(s.qty)
+          && (D(t.price).mul(t.quantity).add(t.fees).sub(want).round(2).isZero() || D(t.price).mul(t.quantity).sub(t.fees).sub(want).round(2).isZero())));
+      if (idx >= 0) out[idx]._cancelled = true;
+      else warnings.push(`${fileName}:${s.l.n}: correctie '${s.l.desc}' zonder overeenkomstige boeking, overgeslagen.`);
+    }
+    const transactions = out.filter(t => !t._cancelled);
+    const cancelled = out.length - transactions.length;
+    if (cancelled) skipped["Geannuleerde boekingen (storno)"] = cancelled * 2;
+
+    // fotowaarde afleiden uit Bolero's eigen resultaat bij verkopen in 2026+
+    // (enkel als het volledig verkochte deel uit lots van vóór 2026 komt)
+    for (const t of transactions) {
+      if (t.type !== "SELL" || t.bolero_result == null || t.trade_date < "2026-01-01") continue;
+      const before = M.holdingsAt(transactions.filter(x => x !== t && x.trade_date < t.trade_date), "2025-12-31")
+        .find(h => h.asset === t.asset && h.owner === t.owner);
+      const bought2026 = transactions.some(x => x.asset === t.asset && x.type === "BUY" && x.trade_date >= "2026-01-01" && x.trade_date <= t.trade_date);
+      const soldEarlier2026 = transactions.some(x => x !== t && x.asset === t.asset && x.type === "SELL" && x.trade_date >= "2026-01-01" && x.trade_date < t.trade_date);
+      if (!before || before.quantity.lt(t.quantity) || bought2026 || soldEarlier2026) continue;
+      const grossEur = D(t.price).mul(t.quantity).div(t.fx_per_eur);
+      const ref = grossEur.sub(t.bolero_result).div(t.quantity);
+      if (ref.gt(ZERO) && D(t.bolero_result).lt(ZERO)) // bij verlies rekent Bolero altijd t.o.v. de fotowaarde
+        refHints[t.asset] = { value: ref.round(4).toString(), from: `afgeleid uit Bolero's resultaat op de verkoop van ${t.trade_date}` };
+    }
+    // posities op 31/12/2025 ter controle: laatste dividend als aanwijzing dat je ze nog had
+    const held = M.holdingsAt(transactions, "2025-12-31");
+    const divKeys = transactions.filter(t => t.type === "DIVIDEND").map(t => ({ k: nameKey(t.asset), date: t.trade_date }));
+    const positions = held.map(h => {
+      const k = nameKey(h.asset);
+      const last = divKeys.filter(d => k.length >= 4 && (d.k.startsWith(k) || k.startsWith(d.k)) && d.k.length >= 4)
+        .map(d => d.date).sort().pop() || null;
+      const activity2026 = transactions.some(t => t.asset === h.asset && t.trade_date >= "2026-01-01" && t.type !== "DIVIDEND");
+      const suspicious = !activity2026 && (!last || last < "2024-07-01");
+      return { asset: h.asset, quantity: h.quantity.toString(), lastDividend: last, suspicious, refHint: refHints[h.asset] || null };
+    });
+    // wisselkoerswaarschuwingen enkel voor effecten die na 2025 nog meetellen
+    const relevant = new Set([...held.map(h => h.asset), ...transactions.filter(t => t.trade_date >= "2026-01-01").map(t => t.asset)]);
+    for (const w of fxWarnings) if (relevant.has(w.asset)) warnings.push(w.text + " Telt mee als dit lot na 2025 verkocht wordt en de historische prijs gebruikt wordt.");
+    return { transactions, skipped, warnings, refHints, assets, positions, fileName, rows: lines.length };
+  }
+
+  const api = { parseBolero, parseCsv, assetName, nameKey };
+  if (typeof module !== "undefined" && module.exports) module.exports = api; else root.BOLERO = api;
+})(typeof window !== "undefined" ? window : globalThis);
+</script>
+<script>/* Minimale .xlsx-lezer: zip uitpakken (DecompressionStream) en werkbladen als rijen teruggeven.
+ * Ondersteunt gedeelde teksten, inline teksten, getallen en booleans. Datums komen als Excel-serienummer (getal). */
+(function (root) {
+  "use strict";
+
+  async function inflateRaw(bytes) {
+    const ds = new DecompressionStream("deflate-raw");
+    const stream = new Blob([bytes]).stream().pipeThrough(ds);
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+
+  async function unzip(buf) {
+    const u8 = new Uint8Array(buf), dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    let eocd = -1;
+    for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    if (eocd < 0) throw new Error("Geen geldig Excel-bestand (zip-structuur niet gevonden).");
+    const count = dv.getUint16(eocd + 10, true);
+    let p = dv.getUint32(eocd + 16, true);
+    const files = {}, dec = new TextDecoder();
+    for (let n = 0; n < count; n++) {
+      if (dv.getUint32(p, true) !== 0x02014b50) throw new Error("Beschadigd Excel-bestand.");
+      const method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true);
+      const nameLen = dv.getUint16(p + 28, true), extraLen = dv.getUint16(p + 30, true), commLen = dv.getUint16(p + 32, true);
+      const local = dv.getUint32(p + 42, true);
+      const name = dec.decode(u8.subarray(p + 46, p + 46 + nameLen));
+      const lNameLen = dv.getUint16(local + 26, true), lExtraLen = dv.getUint16(local + 28, true);
+      const start = local + 30 + lNameLen + lExtraLen;
+      files[name] = { method, data: u8.subarray(start, start + csize) };
+      p += 46 + nameLen + extraLen + commLen;
+    }
+    return {
+      names: Object.keys(files),
+      async text(name) {
+        const f = files[name];
+        if (!f) return null;
+        const raw = f.method === 0 ? f.data : f.method === 8 ? await inflateRaw(f.data) : null;
+        if (!raw) throw new Error(`Niet-ondersteunde compressie in ${name}`);
+        return dec.decode(raw);
+      },
+    };
+  }
+
+  const unesc = s => s.replace(/&(lt|gt|amp|quot|apos|#\d+|#x[0-9a-f]+);/gi, (m, e) => ({ lt: "<", gt: ">", amp: "&", quot: '"', apos: "'" })[e.toLowerCase()]
+    ?? String.fromCodePoint(e[1].toLowerCase() === "x" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10)));
+  const textOf = xml => [...xml.matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)].map(m => unesc(m[1])).join("");
+  const colIndex = ref => { let n = 0; for (const ch of ref.replace(/\d+/g, "")) n = n * 26 + ch.charCodeAt(0) - 64; return n - 1; };
+
+  /** -> { sheetName: [[cel, …], …] } */
+  async function readXlsx(buf) {
+    const z = await unzip(buf);
+    const wb = await z.text("xl/workbook.xml");
+    if (!wb) throw new Error("Geen Excel-werkmap gevonden.");
+    const rels = (await z.text("xl/_rels/workbook.xml.rels")) || "";
+    const relMap = Object.fromEntries([...rels.matchAll(/<Relationship\b[^>]*>/g)].map(m => {
+      const id = /Id="([^"]+)"/.exec(m[0])[1], target = /Target="([^"]+)"/.exec(m[0])[1];
+      return [id, target.startsWith("/") ? target.slice(1) : "xl/" + target.replace(/^\.\//, "")];
+    }));
+    const ssXml = (await z.text("xl/sharedStrings.xml")) || "";
+    const shared = [...ssXml.matchAll(/<si>([\s\S]*?)<\/si>/g)].map(m => textOf(m[1]));
+    const out = {};
+    for (const m of wb.matchAll(/<sheet\b[^>]*>/g)) {
+      const name = unesc(/name="([^"]*)"/.exec(m[0])[1]);
+      const rid = /r:id="([^"]+)"/.exec(m[0])?.[1];
+      const xml = await z.text(relMap[rid] || "");
+      if (!xml) continue;
+      const rows = [];
+      for (const rm of xml.matchAll(/<row\b[^>]*?(?:\/>|>([\s\S]*?)<\/row>)/g)) {
+        const rNum = Number(/\br="(\d+)"/.exec(rm[0])?.[1] || rows.length + 1);
+        const row = [];
+        for (const cm of (rm[1] || "").matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+          const attrs = cm[1], body = cm[2] || "";
+          const ref = /\br="([A-Z]+\d+)"/.exec(attrs)?.[1];
+          const t = /\bt="([^"]+)"/.exec(attrs)?.[1];
+          const v = /<v>([\s\S]*?)<\/v>/.exec(body)?.[1];
+          let val = null;
+          if (t === "s") val = shared[Number(v)] ?? "";
+          else if (t === "inlineStr") val = textOf(body);
+          else if (t === "str") val = v != null ? unesc(v) : "";
+          else if (t === "b") val = v === "1";
+          else if (v != null) val = Number(v);
+          row[ref ? colIndex(ref) : row.length] = val;
+        }
+        rows[rNum - 1] = row;
+      }
+      out[name] = Array.from(rows, r => r ? Array.from(r, c => c === undefined ? null : c) : []);
+    }
+    return out;
+  }
+
+  /** Excel-serienummer -> "JJJJ-MM-DD" */
+  function excelDate(v) {
+    if (typeof v === "string") { const m = /^(\d{4})-(\d\d)-(\d\d)/.exec(v) || /^(\d\d)[-/](\d\d)[-/](\d{4})/.exec(v); return m ? (m[1].length === 4 ? `${m[1]}-${m[2]}-${m[3]}` : `${m[3]}-${m[2]}-${m[1]}`) : null; }
+    if (typeof v !== "number" || !isFinite(v)) return null;
+    const d = new Date(Math.round((Math.floor(v) - 25569) * 864e5));
+    return d.toISOString().slice(0, 10);
+  }
+
+  const api = { readXlsx, excelDate };
+  if (typeof module !== "undefined" && module.exports) module.exports = api; else root.XLSX_LITE = api;
+})(typeof window !== "undefined" ? window : globalThis);
+</script>
+<script>/* Importer voor de Saxo-export "Trades" (Excel, of dezelfde kolommen als CSV).
+ * Blad "Transacties": één regel per uitgevoerde order, met ISIN, prijs in instrumentmunt,
+ * omrekeningskoers (EUR per eenheid instrumentmunt) en totale kosten in EUR.
+ * Blad "Bookings" (optioneel): opsplitsing van de kosten (commissie, beurstaks, Franse FTT).
+ * Dividenden en corporate actions staan niet in deze export. */
+(function (root) {
+  "use strict";
+  const node = typeof module !== "undefined" && module.exports;
+  const M = node ? require("./engine.js") : root.MWB;
+  const X = node ? require("./xlsx.js") : root.XLSX_LITE;
+  const { D, ZERO } = M;
+
+  const norm = s => String(s ?? "").replace(/ /g, " ").replace(/\s+/g, " ").trim().toLowerCase();
+  function num(v) {
+    if (v == null || v === "" || v === "-") return null;
+    if (typeof v === "number") {
+      if (!isFinite(v)) return null;
+      let s = String(v);
+      if (/e/i.test(s)) s = v.toFixed(12);
+      return D(s);
+    }
+    const s = String(v).trim();
+    // CSV kan "1.234,56" (BE) of "1234.56" bevatten
+    return D(/,\d{1,6}$/.test(s) ? s.replace(/\./g, "").replace(",", ".") : s.replace(/,/g, ""));
+  }
+  const abs = d => (d.lt(0) ? d.neg() : d);
+
+  /** "*Delsited 20260430 (JDE Peet's)" -> { date: "2026-04-30", name: "JDE Peet's" } */
+  function delistedTag(name) {
+    const m = /^\*\s*del\w*?ted\s+(\d{4})(\d\d)(\d\d)\s*\((.+)\)\s*$/i.exec(String(name || "").trim());
+    return m ? { date: `${m[1]}-${m[2]}-${m[3]}`, name: m[4].trim() } : null;
+  }
+
+  function tableFrom(rows, required) {
+    const hIdx = rows.findIndex(r => r && required.every(k => r.some(c => norm(c) === k)));
+    if (hIdx < 0) return null;
+    const h = rows[hIdx].map(norm);
+    return { col: k => h.indexOf(k), rows: rows.slice(hIdx + 1).map((r, i) => ({ r: r || [], n: hIdx + i + 2 })) };
+  }
+
+  /** sheets: { naam: rijen } (uit readXlsx) of { csv: rijen } */
+  function parseSaxoSheets(sheets, { owner = "ik", broker = "Saxo", fileName = "saxo.xlsx" } = {}) {
+    const all = Object.entries(sheets);
+    let T = null, sheetName = null;
+    for (const [name, rows] of all) {
+      T = tableFrom(rows, ["transactiedatum", "instrument isin", "traded quantity", "prijs"]);
+      if (T) { sheetName = name; break; }
+    }
+    if (!T) throw new Error("Dit lijkt geen Saxo-export van transacties: de kolommen 'Transactiedatum', 'Instrument ISIN', 'Traded Quantity' en 'Prijs' ontbreken.");
+    const c = {
+      date: T.col("transactiedatum"), tradeDate: T.col("aangepaste transactiedatum"), type: T.col("transactietype"),
+      action: T.col("acties"), amount: T.col("boekingsbedrag (eur)"), rate: T.col("omrekeningskoers"), costs: T.col("totale kosten"),
+      pl: T.col("gerealiseerde w/v"), instr: T.col("instrument"), symbol: T.col("instrumentsymbool"), isin: T.col("instrument isin"),
+      ccy: T.col("instrumentvaluta"), kind: T.col("type"), openClose: T.col("openen/sluiten"), qty: T.col("traded quantity"),
+      price: T.col("prijs"), value: T.col("verhandelde waarde"), txid: T.col("transactie-id"), exch: T.col("uitwisselingsbeschrijving"),
+    };
+
+    // kostenopsplitsing uit "Bookings"
+    const taxesById = new Map();
+    for (const [name, rows] of all) {
+      if (name === sheetName) continue;
+      const B = tableFrom(rows, ["transactie-id", "amount type", "boekingsbedrag"]);
+      if (!B) continue;
+      const bi = B.col("transactie-id"), bt = B.col("amount type"), ba = B.col("boekingsbedrag");
+      for (const { r } of B.rows) {
+        const id = String(r[bi] ?? "").trim(), type = norm(r[bt]);
+        if (!id || !/beurstaks|transactiebelasting|stamp|ftt|taks/.test(type)) continue;
+        const amt = num(r[ba]); if (!amt) continue;
+        taxesById.set(id, (taxesById.get(id) || ZERO).add(abs(amt))); // boekingsbedrag staat in EUR
+      }
+    }
+
+    const out = [], warnings = [], skipped = {}, assets = {}, delistInfo = new Map();
+    const seen = new Map();
+    let firstDate = null, lastDate = null;
+    const lines = T.rows.filter(({ r }) => r.some(v => v != null && v !== "")).reverse(); // export is aflopend
+    for (const { r, n } of lines) {
+      const src = `${fileName}:${n}`;
+      const type = norm(r[c.type]);
+      const date = X.excelDate(r[c.tradeDate] ?? r[c.date]) || X.excelDate(r[c.date]);
+      if (!date) { warnings.push(`${src}: geen geldige datum, overgeslagen.`); continue; }
+      if (type && type !== "transactie") { skipped[`Type '${r[c.type]}'`] = (skipped[`Type '${r[c.type]}'`] || 0) + 1; continue; }
+      const oc = norm(r[c.openClose]);
+      const isin = String(r[c.isin] ?? "").trim().toUpperCase();
+      const rawName = String(r[c.instr] ?? "").trim();
+      const tag = delistedTag(rawName);
+      const name = tag ? tag.name : rawName;
+      if (oc === "pending" || r[c.amount] == null || r[c.amount] === "") {
+        skipped["Niet (volledig) uitgevoerde orders"] = (skipped["Niet (volledig) uitgevoerde orders"] || 0) + 1;
+        warnings.push(`${src}: order ${String(r[c.action] || "").trim()} in ${name} op ${date} staat als '${r[c.openClose] || "zonder boeking"}' – niet geïmporteerd. Importeer later een nieuwere export.`);
+        continue;
+      }
+      const qtyRaw = num(r[c.qty]), price = num(r[c.price]);
+      if (!qtyRaw || qtyRaw.isZero() || price == null) { warnings.push(`${src}: aantal of prijs ontbreekt (${name}), overgeslagen.`); continue; }
+      if (!isin) warnings.push(`${src}: geen ISIN voor ${name}; de naam wordt gebruikt als sleutel.`);
+      const isSell = qtyRaw.lt(0) || oc === "to close" && /verkoop/i.test(String(r[c.action]));
+      const qty = abs(qtyRaw);
+      const ccy = String(r[c.ccy] || "EUR").trim().toUpperCase() || "EUR";
+      const rate = num(r[c.rate]); // EUR per eenheid instrumentmunt
+      let fx = D(1);
+      if (ccy !== "EUR") {
+        if (!rate || !rate.gt(0)) { warnings.push(`${src}: geen omrekeningskoers voor ${name} (${ccy}), overgeslagen.`); continue; }
+        fx = D(1).div(rate).round(10);
+      }
+      const costsEur = abs(num(r[c.costs]) || ZERO);
+      const txid = String(r[c.txid] ?? "").trim();
+      const taxEur = Dmin(taxesById.get(txid) || ZERO, costsEur);
+      const toCcy = eurAmt => (ccy === "EUR" ? eurAmt : eurAmt.mul(fx)).round(2);
+      const asset = isin || name.toUpperCase();
+      const base = `saxo|${txid || ""}|${date}|${asset}|${qtyRaw}|${price}`;
+      const k = (seen.get(base) || 0) + 1; seen.set(base, k);
+      const t = {
+        type: isSell ? "SELL" : "BUY", trade_date: date, asset, quantity: qty.toString(), price: price.toString(), currency: ccy,
+        fx_per_eur: fx.toString(), fees: toCcy(costsEur.sub(taxEur)).toString(), taxes: toCcy(taxEur).toString(), owner, broker,
+        historic_proven: !isSell && date < "2026-01-01", cost_known: true, reynders_eur: "0", amount: "0", split_ratio: null,
+        note: [name, ccy !== "EUR" ? `koers Saxo: 1 ${ccy} = ${rate} EUR` : ""].filter(Boolean).join("; "),
+        import_id: "s:" + (txid ? `${txid}|${k}` : base + "|" + k), import_source: src,
+      };
+      const pl = num(r[c.pl]);
+      if (isSell && pl != null) t.saxo_result = pl.toString();
+      out.push(t);
+      assets[asset] ??= { currency: ccy, name, symbol: String(r[c.symbol] || "").trim(), kind: String(r[c.kind] || "").trim() };
+      if (tag) delistInfo.set(asset, { date: tag.date, name });
+      firstDate = !firstDate || date < firstDate ? date : firstDate;
+      lastDate = !lastDate || date > lastDate ? date : lastDate;
+    }
+
+    // delistings die Saxo in de naam markeert: voorstel als je op die datum nog stuks had
+    const delistings = [];
+    for (const [asset, info] of delistInfo) {
+      const held = M.holdingsAt(out, info.date).find(h => h.asset === asset);
+      const afterExport = lastDate && info.date > lastDate;
+      if (held) delistings.push({ asset, name: info.name, date: info.date, quantity: held.quantity.toString(), afterExport });
+      else warnings.push(`${info.name} (${asset}): door Saxo gemarkeerd als geschrapt op ${info.date}; je had op die datum geen stuks meer, dus er is niets te doen.`);
+    }
+
+    const positions = M.holdingsAt(out, "2025-12-31").map(h => ({
+      asset: h.asset, name: assets[h.asset]?.name || "", quantity: h.quantity.toString(), lastDividend: null, suspicious: false, refHint: null,
+    }));
+    if (firstDate && firstDate > "2015-01-01")
+      warnings.push(`De export loopt van ${firstDate} tot ${lastDate}. Had je bij Saxo al effecten vóór ${firstDate}, exporteer dan een langere periode: anders ontbreken aankopen en klopt FIFO niet.`);
+    if (out.some(t => t.saxo_result != null && t.trade_date >= "2026-01-01" && positions.some(p => p.asset === t.asset)))
+      warnings.push("Saxo's 'Gerealiseerde W/V' is berekend op je aankoopprijs; voor effecten van vóór 2026 rekent de wet met de waarde op 31/12/2025. Verschillen zijn dus normaal.");
+    warnings.push("Saxo is een buitenlandse broker: er wordt geen Belgische meerwaardebelasting ingehouden. Je geeft deze meerwaarden zelf aan.");
+    return { source: "saxo", transactions: out, skipped, warnings, refHints: {}, assets, positions, delistings, fileName, rows: lines.length, period: [firstDate, lastDate] };
+  }
+  const Dmin = (a, b) => (a.lte(b) ? a : b);
+
+  async function parseSaxoFile(buf, opts) {
+    const sheets = await X.readXlsx(buf);
+    return parseSaxoSheets(sheets, opts);
+  }
+
+  const api = { parseSaxoSheets, parseSaxoFile, delistedTag };
+  if (node) module.exports = api; else root.SAXO = api;
+})(typeof window !== "undefined" ? window : globalThis);
+</script>
+<script>"use strict";
+/* Interface + opslag. Alle berekeningen via MWB (engine.js). */
+const { D, Dec, calculate, defaultConfig } = window.MWB;
+
+const TYPE_LABELS = {
+  BUY: "Aankoop", SELL: "Verkoop", SPLIT: "Splitsing", DIVIDEND: "Dividend", FEE: "Kosten",
+  TRANSFER_IN: "Overdracht in", GIFT_IN: "Schenking", INHERIT_IN: "Erfenis", DELISTING: "Delisting",
+};
+const DELIST_LABELS = { NOTERING: "Enkel schrapping notering", UITKOOP: "Uitkoop / bod tegen prijs", WAARDELOOS: "Waardeloos (faillissement/vereffening)" };
+const DELIST_SHORT = { NOTERING: "schrapping", UITKOOP: "uitkoop", WAARDELOOS: "waardeloos" };
+const BASIS_LABELS = { AANKOOP: "aankoopprijs", REF_31_12_2025: "waarde 31/12/2025", HISTORISCH: "historische prijs", ONBEKEND: "onbekend (0)" };
+const ACQ = ["BUY", "TRANSFER_IN", "GIFT_IN", "INHERIT_IN"];
+const ASSET_TYPES = ["aandeel", "etf", "obligatie", "fonds", "crypto", "valuta", "verzekering", "ander"];
+const TABS = ["rapport", "transacties", "activa", "instellingen"];
+const DEFAULT_OWNER = "ik";
+
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const nf = new Intl.NumberFormat("nl-BE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const eur = v => v == null ? "–" : "€ " + nf.format(Number(v));
+function num(v) {
+  if (v == null || v === "") return "";
+  const s = String(v), neg = s.startsWith("-");
+  const [i, d] = s.replace("-", "").split(".");
+  const ip = BigInt(i || "0").toLocaleString("nl-BE");
+  const dp = d ? d.replace(/0+$/, "") : "";
+  return (neg ? "-" : "") + (dp ? `${ip},${dp}` : ip);
+}
+const signClass = v => Number(v) > 0 ? "pos" : Number(v) < 0 ? "neg" : "";
+
+// ================================================================ toestand
+function emptyState() {
+  return {
+    version: 1, nextId: 1, transactions: [], assets: {}, withheld: [],
+    years: { 2026: { rate: "0.10", base_exemption: "10000", carry_slice: "1000", carry_validity_years: 5,
+                     source: "Wet 6.4.2026 (BS 21.4.2026); vrijstelling 2026 = 10.000 EUR" } },
+    settings: { historic_method: "FIFO", fifo_scope: "EIGENAAR" },
+  };
+}
+let state = emptyState();
+
+function validState(s) {
+  return s && typeof s === "object" && Array.isArray(s.transactions) && s.assets && typeof s.assets === "object"
+    && s.years && s.settings && Array.isArray(s.withheld);
+}
+
+// ================================================================ opslag
+const LS_KEY = "meerwaarde-state-v1";
+const storage = { mode: "geheugen", db: null, ref: null, base: null, writing: false, pending: null, lastJson: null };
+const CHUNK = 90000; // tekens per opslagdeel (documentlimiet 256 KB, ruime marge voor escaping)
+
+function lsGet() { try { return localStorage.getItem(LS_KEY); } catch { return null; } }
+function lsSet(v) { try { localStorage.setItem(LS_KEY, v); return true; } catch { return false; } }
+
+async function initStorage() {
+  const local = lsGet();
+  if (local) { try { const s = JSON.parse(local); if (validState(s)) state = s; } catch {} }
+  let lsOk = false;
+  try { localStorage.setItem(LS_KEY + "-test", "1"); localStorage.removeItem(LS_KEY + "-test"); lsOk = true; } catch {}
+  storage.mode = lsOk ? "browser" : "geheugen";
+  renderStorageStatus();
+  render();
+
+  const use = window.claude && typeof window.claude.use === "function" ? window.claude.use.bind(window.claude) : null;
+  if (!use) return;
+  try {
+    const [db, user] = await Promise.all([use("db"), use("user")]);
+    const uid = user ? await user.id() : null;
+    if (!db || !uid) return;
+    storage.db = db;
+    storage.base = `data/users/${uid}/state`;
+    storage.ref = db.doc(storage.base);
+    storage.mode = "account-laden";
+    renderStorageStatus();
+    const timer = setTimeout(() => { if (storage.mode === "account-laden") { storage.mode = "account-traag"; renderStorageStatus(); } }, 10000);
+    storage.ref.onSnapshot(async snap => {
+      clearTimeout(timer);
+      const wasLoading = storage.mode !== "account";
+      storage.mode = "account";
+      if (snap.exists) {
+        // eigen (lopende) schrijfacties niet terug inlezen: enkel wijzigingen van een ander toestel
+        const busy = () => storage.writing || storage.pending != null || snap.metadata.hasPendingWrites;
+        if (!busy()) {
+          const json = await readStoredJson(snap.data());
+          if (json && json !== storage.lastJson && !busy()) {
+            try {
+              const s = JSON.parse(json);
+              if (validState(s)) { state = s; storage.lastJson = json; lsSet(json); render(); }
+            } catch {}
+          }
+        }
+      } else if (wasLoading && state.transactions.length) {
+        persist(); // gegevens uit deze browser naar het account overzetten
+      }
+      renderStorageStatus();
+    }, err => {
+      clearTimeout(timer);
+      storage.mode = storage.mode === "account" ? "account-fout" : (lsGet() !== null ? "browser" : "geheugen");
+      storage.ref = null;
+      renderStorageStatus(err && err.code);
+    });
+  } catch { /* geen account-opslag: lokaal verder */ }
+}
+
+/** Hoofddocument bevat de JSON zelf, of verwijst naar delen state-p0, state-p1, … met dezelfde stempel. */
+async function readStoredJson(d) {
+  if (typeof d.json === "string") return d.json;
+  if (!d.parts) return null;
+  const parts = await Promise.all(Array.from({ length: d.parts }, (_, i) => storage.db.doc(`${storage.base}-p${i}`).get()));
+  if (parts.some(p => !p.exists || p.data().stamp !== d.stamp)) return null; // nog niet volledig geschreven
+  return parts.map(p => p.data().chunk).join("");
+}
+function persist() {
+  const json = JSON.stringify(state);
+  lsSet(json);
+  if (!storage.ref) return;
+  storage.pending = json;
+  flush();
+}
+async function flush() {
+  if (storage.writing || storage.pending == null || !storage.ref) return;
+  const json = storage.pending; storage.pending = null; storage.writing = true;
+  storage.lastJson = json;
+  try {
+    const updated = new Date().toISOString();
+    if (json.length <= CHUNK) await storage.ref.set({ json, updated });
+    else {
+      const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const n = Math.ceil(json.length / CHUNK);
+      for (let i = 0; i < n; i++)
+        await storage.db.doc(`${storage.base}-p${i}`).set({ chunk: json.slice(i * CHUNK, (i + 1) * CHUNK), stamp, i });
+      await storage.ref.set({ parts: n, stamp, updated });
+    }
+  } catch (e) {
+    if (e && e.code === "unavailable") { await new Promise(r => setTimeout(r, 800 + Math.random() * 800)); storage.pending ??= json; }
+    else { toast("Opslaan in je account mislukt" + (e && e.code ? ` (${e.code})` : "") + ". Je gegevens staan nog in deze browser."); }
+  } finally { storage.writing = false; if (storage.pending != null) flush(); }
+}
+function commit() { persist(); render(); }
+
+function renderStorageStatus(code) {
+  const el = $("#storage-status");
+  const m = {
+    "account": ["ok", "Privé bewaard in je Claude-account (ook op je andere toestellen)"],
+    "account-laden": ["", "Je gegevens worden geladen…"],
+    "account-traag": ["warn", "Je account-opslag reageert nog niet; wat je ziet kan verouderd zijn."],
+    "account-fout": ["warn", "Verbinding met je account-opslag verbroken" + (code ? ` (${code})` : "") + ". Wijzigingen blijven in deze browser."],
+    "browser": ["warn", "Alleen bewaard in deze browser. Maak regelmatig een back-up (Instellingen)."],
+    "geheugen": ["warn", "Niet bewaard: deze browser laat geen opslag toe. Maak een back-up voor je de pagina sluit."],
+  }[storage.mode] || ["", ""];
+  el.className = `storage ${m[0]}`;
+  el.textContent = m[1];
+}
+
+// ================================================================ validatie (zoals web/app.py)
+class InputError extends Error {}
+function dec(value, field, { required = false, positive = false, nonNegative = false } = {}) {
+  if (value == null || String(value).trim() === "") { if (required) throw new InputError(`Veld '${field}' is verplicht.`); return null; }
+  let d;
+  try { d = D(value); } catch { throw new InputError(`Veld '${field}' is geen geldig getal: ${value}`); }
+  if (positive && !d.gt(0)) throw new InputError(`Veld '${field}' moet groter dan 0 zijn.`);
+  if (nonNegative && d.lt(0)) throw new InputError(`Veld '${field}' mag niet negatief zijn.`);
+  return d.toString();
+}
+function validateTx(p) {
+  if (!TYPE_LABELS[p.type]) throw new InputError(`Onbekend transactietype: ${p.type}`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(p.trade_date || "") || isNaN(Date.parse(p.trade_date))) throw new InputError("Datum moet het formaat JJJJ-MM-DD hebben.");
+  const asset = String(p.asset || "").trim().toUpperCase();
+  if (!asset) throw new InputError("Actief (ISIN of ticker) is verplicht.");
+  const out = {
+    owner: String(p.owner || DEFAULT_OWNER).trim(), broker: String(p.broker || "").trim(), trade_date: p.trade_date,
+    type: p.type, asset, currency: String(p.currency || "EUR").trim().toUpperCase(),
+    fx_per_eur: dec(p.fx_per_eur || "1", "wisselkoers", { positive: true }),
+    fees: dec(p.fees || "0", "kosten", { nonNegative: true }), taxes: dec(p.taxes || "0", "taksen", { nonNegative: true }),
+    historic_proven: !!p.historic_proven, cost_known: p.cost_known !== false,
+    reynders_eur: dec(p.reynders_eur || "0", "Reynders-bedrag", { nonNegative: true }),
+    note: String(p.note || "").trim(), quantity: "0", price: "0", amount: "0", split_ratio: null,
+  };
+  if (out.currency === "EUR" && !D(out.fx_per_eur).eq(1)) throw new InputError("Voor EUR moet de wisselkoers 1 zijn.");
+  if (ACQ.includes(p.type) || p.type === "SELL") {
+    out.quantity = dec(p.quantity, "aantal", { required: true, positive: true });
+    const price = dec(p.price, "prijs", { required: p.type === "SELL" || out.cost_known, nonNegative: true });
+    out.price = price ?? "0";
+  } else if (p.type === "SPLIT") out.split_ratio = dec(p.split_ratio, "split-ratio", { required: true, positive: true });
+  else if (p.type === "DELISTING") {
+    if (!DELIST_LABELS[p.delist_mode]) throw new InputError("Kies de soort delisting.");
+    out.delist_mode = p.delist_mode;
+    if (p.delist_mode === "UITKOOP") {
+      out.price = dec(p.price, "uitkoopprijs", { required: true, nonNegative: true });
+      out.quantity = dec(p.quantity, "aantal", { positive: true }) ?? "0";
+    }
+  }
+  else out.amount = dec(p.amount, "bedrag", { required: true, nonNegative: true });
+  if (!ACQ.includes(p.type) || p.type === "BUY") out.cost_known = true;
+  if (!ACQ.includes(p.type) || p.trade_date >= "2026-01-01") out.historic_proven = false;
+  return out;
+}
+
+// ================================================================ rapport
+function engineInputs(method) {
+  const cfg = defaultConfig();
+  cfg.years = {};
+  for (const [y, c] of Object.entries(state.years))
+    cfg.years[y] = { rate: D(c.rate), baseExemption: D(c.base_exemption), carrySlice: D(c.carry_slice), carryValidityYears: Number(c.carry_validity_years) || 5, source: c.source };
+  cfg.historicMethod = method || state.settings.historic_method;
+  cfg.fifoScope = state.settings.fifo_scope;
+  const refs = {};
+  for (const [isin, a] of Object.entries(state.assets)) if (a.ref_value_eur != null && a.ref_value_eur !== "") refs[isin] = a.ref_value_eur;
+  const withheld = {};
+  for (const w of state.withheld) withheld[`${w.owner}|${w.year}`] = w.amount;
+  const txs = state.transactions.slice().sort((a, b) => a.trade_date < b.trade_date ? -1 : a.trade_date > b.trade_date ? 1 : a.id - b.id)
+    .map(t => ({ ...t, source: `transactie #${t.id}` }));
+  return [txs, refs, cfg, withheld];
+}
+function runReport(method) { return calculate(...engineInputs(method)); }
+
+function delistedOn(isin) {
+  const d = state.transactions.filter(t => t.asset === isin && t.type === "DELISTING").map(t => t.trade_date).sort();
+  return d.length ? d[d.length - 1] : null;
+}
+let openEnd2025 = { key: null, set: new Set() };
+function needsRef(isin) {
+  // fotowaarde enkel nodig voor effecten die je op 31/12/2025 nog had
+  const key = state.transactions.length + "|" + (state.transactions[state.transactions.length - 1]?.id ?? 0) + "|" + state.settings.fifo_scope;
+  if (openEnd2025.key !== key) {
+    const cfg = { ...defaultConfig(), fifoScope: state.settings.fifo_scope };
+    openEnd2025 = { key, set: new Set(window.MWB.holdingsAt(state.transactions, "2025-12-31", cfg).map(h => h.asset)) };
+  }
+  return openEnd2025.set.has(isin);
+}
+
+function renderReport() {
+  const err = $("#report-error");
+  err.hidden = true;
+  let r;
+  try { r = runReport(); }
+  catch (e) {
+    err.innerHTML = `<strong>Kan niet rekenen.</strong> ${esc(e.message)}` +
+      (/31\/12\/2025/.test(e.message) ? ` <a href="#activa">Vul de waarde in bij Activa.</a>` : "") +
+      (/inkomstenjaar/.test(e.message) ? ` <a href="#instellingen">Voeg het jaar toe bij Instellingen.</a>` : "");
+    err.hidden = false;
+    $("#year-cards").innerHTML = ""; $("#sales").innerHTML = ""; $("#sales-title").hidden = true;
+    $("#events").innerHTML = ""; $("#events-title").hidden = true;
+    return;
+  }
+  $("#sales-title").hidden = false;
+  const method = state.settings.historic_method, other = method === "FIFO" ? "GEMIDDELD" : "FIFO";
+  let alt = null;
+  try { alt = runReport(other); } catch {}
+  $("#report-settings").textContent =
+    `Historische prijs: ${method === "FIFO" ? "per lot (FIFO)" : "gemiddelde"} · FIFO ${state.settings.fifo_scope === "BROKER" ? "per broker" : "over alle brokers"}`;
+
+  const cards = $("#year-cards");
+  if (!r.years.length) {
+    cards.innerHTML = `<div class="empty"><p>Nog geen verkopen of inhoudingen.</p>
+      <p><button class="btn primary" data-action="new-tx">+ Eerste transactie</button>
+      <button class="btn ghost" data-action="load-example">Voorbeeld laden</button></p></div>`;
+  } else {
+    cards.innerHTML = r.years.map(y => {
+      const a = alt && alt.years.find(x => x.owner === y.owner && x.year === y.year);
+      const showAlt = a && !(a.net_eur.eq(y.net_eur) && a.tax_eur.eq(y.tax_eur));
+      const refund = y.refund_eur;
+      const carries = Object.entries(y.carry_detail).map(([k, v]) => `${k}: ${eur(v.toFixed(2))}`).join(", ");
+      const f = k => y[k].toFixed(2);
+      return `<article class="card">
+        <h4><span>${y.year}</span><span class="muted small">${esc(y.owner)} · ${y.sale_count} ${y.sale_count === 1 ? "verkoop" : "verkopen"}</span></h4>
+        <dl class="kv">
+          <dt>Meerwaarden</dt><dd class="pos">${eur(f("gains_eur"))}</dd>
+          <dt>Minderwaarden</dt><dd class="neg">${eur(f("losses_eur"))}</dd>
+          <dt class="strong">Netto meerwaarde</dt><dd class="strong">${eur(f("net_eur"))}</dd>
+          ${y.lost_losses_eur.lt(0) ? `<dt>Niet verrekenbaar verlies</dt><dd class="muted">${eur(f("lost_losses_eur"))}</dd>` : ""}
+          <div class="sep"></div>
+          <dt>Vrijstelling beschikbaar</dt><dd>${eur(f("exemption_available_eur"))}</dd>
+          <dt>· uit overdracht</dt><dd>${eur(f("carry_used_eur"))}</dd>
+          <dt>· uit basis</dt><dd>${eur(f("base_used_eur"))}</dd>
+          <dt>Nieuwe overdracht</dt><dd>${eur(f("carry_generated_eur"))}</dd>
+          <div class="sep"></div>
+          <dt class="strong">Belastbaar</dt><dd class="strong">${eur(f("taxable_eur"))}</dd>
+          <dt class="strong">Belasting</dt><dd class="strong">${eur(f("tax_eur"))}</dd>
+          <dt>Ingehouden door broker</dt><dd>${eur(f("withheld_eur"))}</dd>
+          ${!y.dividends_eur.isZero() ? `<dt>Dividenden (info)</dt><dd class="muted">${eur(f("dividends_eur"))}</dd>` : ""}
+        </dl>
+        <div class="result-line"><span>${refund.gte(0) ? "Terug te vorderen" : "Bij te betalen"}</span>
+          <span class="big ${refund.gt(0) ? "pos" : refund.lt(0) ? "neg" : ""}">${eur(Math.abs(Number(refund.toFixed(2))))}</span></div>
+        ${carries ? `<p class="hint">Overdrachten beschikbaar na ${y.year}: ${esc(carries)}</p>` : ""}
+        ${showAlt ? `<div class="alert warn small">Met de methode <strong>${other === "FIFO" ? "per lot (FIFO)" : "gemiddelde"}</strong>
+          zou de netto meerwaarde ${eur(a.net_eur.toFixed(2))} zijn en de belasting ${eur(a.tax_eur.toFixed(2))}.</div>` : ""}
+      </article>`;
+    }).join("");
+  }
+
+  $("#sales").innerHTML = r.sales.length ? r.sales.slice().reverse().map(s => `
+    <details><summary>
+      <span>${esc(s.trade_date)}</span><strong class="grow">${esc(assetLabel(s.asset))}${s.kind === "UITKOOP" ? ` <span class="badge SELL">uitkoop</span>` : ""}</strong>
+      <span class="muted small">${num(s.quantity.toString())} st.${s.broker ? " · " + esc(s.broker) : ""}</span>
+      <span class="num ${signClass(s.result_eur.toFixed(2))}"><strong>${eur(s.result_eur.toFixed(2))}</strong></span>
+      ${s.warnings.length ? `<span class="badge need" title="Waarschuwing">!</span>` : ""}
+      ${boleroBadge(s)}
+    </summary><div class="detail">
+      ${boleroCheck(s)}
+      <p class="small muted">Opbrengst ${eur(s.proceeds_eur.toFixed(2))} · kosten ${eur(s.fees_eur.toFixed(2))} (niet aftrekbaar)
+        ${!s.reynders_deduction_eur.isZero() ? ` · Reynders-aftrek ${eur(s.reynders_deduction_eur.toFixed(2))}` : ""} · ${esc(s.source)}</p>
+      <div class="table-wrap"><table><thead><tr><th>Lot (aankoop)</th><th class="num">Aantal</th><th class="num">Opbrengst</th>
+        <th class="num">Basis</th><th>Basis volgens</th><th class="num">Resultaat</th><th>Opmerking</th></tr></thead>
+      <tbody>${s.lines.map(l => `<tr><td>${esc(l.acquired || "–")}</td><td class="num">${num(l.quantity.toString())}</td>
+        <td class="num">${eur(l.proceeds_eur.toFixed(2))}</td><td class="num">${eur(l.basis_eur.toFixed(2))}</td>
+        <td>${esc(BASIS_LABELS[l.basis_used])}</td><td class="num ${signClass(l.result_eur.toFixed(2))}">${eur(l.result_eur.toFixed(2))}</td>
+        <td class="small">${esc(l.note)}</td></tr>`).join("")}</tbody></table></div>
+      ${s.warnings.map(w => `<div class="alert warn small">${esc(w)}</div>`).join("")}
+    </div></details>`).join("") : `<p class="empty">Nog geen verkopen vanaf 2026.</p>`;
+
+  const ev = r.events.filter(e => e.kind !== "UITKOOP");
+  $("#events-title").hidden = !ev.length;
+  $("#events").innerHTML = ev.slice().reverse().map(e => `
+    <div class="event"><div class="row"><span>${esc(e.trade_date)}</span><strong>${esc(assetLabel(e.asset))}</strong>
+      <span class="badge">${esc(DELIST_SHORT[e.kind])}</span>
+      <span class="muted small">${num(e.quantity_held.toString())} st. in bezit · ${esc(e.owner)}</span></div>
+      <p class="small muted">${esc(e.note)}</p></div>`).join("");
+}
+
+/** Naam als die gekend is en verschilt van de sleutel (bv. ISIN), anders de sleutel. */
+function assetLabel(id) {
+  const n = state.assets[id]?.name;
+  return n && n.toUpperCase() !== id ? `${n} (${id})` : id;
+}
+function txOfSale(s) {
+  const id = Number((/#(\d+)/.exec(s.source) || [])[1]);
+  return state.transactions.find(t => t.id === id);
+}
+function boleroBadge(s) {
+  const t = txOfSale(s);
+  if (!t || t.bolero_result == null) return "";
+  const same = D(t.bolero_result).round(2).eq(s.result_eur.round(2));
+  return same ? `<span class="badge ok" title="Zelfde resultaat als Bolero">= Bolero</span>`
+              : `<span class="badge need" title="Wijkt af van Bolero">≠ Bolero</span>`;
+}
+function boleroCheck(s) {
+  const t = txOfSale(s);
+  if (!t || t.bolero_result == null) return "";
+  const b = D(t.bolero_result), diff = s.result_eur.sub(b).round(2);
+  if (diff.isZero()) return `<div class="alert ok small">Zelfde resultaat als Bolero berekende (${eur(b.toFixed(2))}).</div>`;
+  return `<div class="alert warn small">Bolero berekende ${eur(b.toFixed(2))}, deze tool ${eur(s.result_eur.toFixed(2))} (verschil ${eur(diff.toFixed(2))}).
+    Mogelijke oorzaken: een andere waarde op 31/12/2025, een hogere historische prijs die je zelf inroept (Bolero gebruikt die niet),
+    FIFO over meerdere brokers, of een ontbrekende transactie.</div>`;
+}
+
+function salesCsv() {
+  const r = runReport();
+  const rows = [["eigenaar", "broker", "verkoopdatum", "actief", "aankoopdatum lot", "aantal", "opbrengst_eur", "basis_eur", "basis", "resultaat_eur", "opmerking"]];
+  for (const s of r.sales) {
+    for (const l of s.lines) rows.push([s.owner, s.broker, s.trade_date, s.asset, l.acquired || "", l.quantity.toString(),
+      l.proceeds_eur.toFixed(2), l.basis_eur.toFixed(2), l.basis_used, l.result_eur.toFixed(2), l.note]);
+    if (!s.reynders_deduction_eur.isZero()) rows.push([s.owner, s.broker, s.trade_date, s.asset, "", "", "", "", "REYNDERS",
+      s.reynders_deduction_eur.neg().toFixed(2), "Aftrek belastbare interestcomponent"]);
+  }
+  return rows.map(r => r.map(c => /[;"\n]/.test(String(c)) ? `"${String(c).replace(/"/g, '""')}"` : c).join(";")).join("\r\n");
+}
+
+// ================================================================ transacties
+function renderTransactions() {
+  const all = state.transactions;
+  fillFilter("#f-year", [...new Set(all.map(t => t.trade_date.slice(0, 4)))].sort().reverse());
+  fillFilter("#f-owner", [...new Set(all.map(t => t.owner))].sort());
+  $("#asset-list").innerHTML = Object.keys(state.assets).map(a => `<option value="${esc(a)}">`).join("");
+  $("#owner-list").innerHTML = [...new Set([DEFAULT_OWNER, ...all.map(t => t.owner)])].map(o => `<option value="${esc(o)}">`).join("");
+  const fy = $("#f-year").value, fo = $("#f-owner").value, fa = $("#f-asset").value.trim().toUpperCase();
+  const rows = all.filter(t => (!fy || t.trade_date.startsWith(fy)) && (!fo || t.owner === fo) && (!fa || t.asset.includes(fa)))
+    .sort((a, b) => a.trade_date < b.trade_date ? 1 : a.trade_date > b.trade_date ? -1 : b.id - a.id);
+  $("#tx-empty").hidden = rows.length > 0;
+  $("#tx-count").textContent = all.length ? `${rows.length} van ${all.length}` : "";
+  $("#tx-table tbody").innerHTML = rows.map(t => {
+    const amt = t.type === "DIVIDEND" || t.type === "FEE";
+    const value = t.type === "SPLIT" ? `${num(t.split_ratio)} : 1` : amt ? num(t.amount)
+      : t.type === "DELISTING" ? (t.delist_mode === "UITKOOP" ? num(t.price) : "")
+      : num(t.price);
+    return `<tr data-id="${t.id}" class="clickable" title="Tik om te bewerken">
+      <td>${esc(t.trade_date)}</td>
+      <td><span class="badge ${esc(t.type)}">${esc(TYPE_LABELS[t.type])}</span>
+        ${t.historic_proven ? `<span class="badge" title="Historische prijs bewijsbaar">H</span>` : ""}
+        ${!t.cost_known ? `<span class="badge need" title="Aanschaffingswaarde onbekend">?</span>` : ""}
+        ${t.type === "DELISTING" ? `<span class="badge">${esc(DELIST_SHORT[t.delist_mode] || "")}</span>` : ""}</td>
+      <td>${esc(t.asset)}</td>
+      <td class="num">${["SPLIT", "DIVIDEND", "FEE"].includes(t.type) || (t.type === "DELISTING" && D(t.quantity || 0).isZero()) ? "" : num(t.quantity)}</td>
+      <td class="num">${value}</td>
+      <td>${esc(t.currency)}${t.currency !== "EUR" ? ` <span class="muted small">@${num(t.fx_per_eur)}</span>` : ""}</td>
+      <td>${esc(t.owner)}</td><td>${esc(t.broker)}</td>
+      <td class="actions-cell"><button class="btn small danger" data-del="${t.id}" aria-label="Verwijder">✕</button></td></tr>`;
+  }).join("");
+}
+function fillFilter(sel, values) {
+  const el = $(sel), cur = el.value;
+  el.innerHTML = `<option value="">Alle</option>` + values.map(v => `<option>${esc(v)}</option>`).join("");
+  el.value = values.includes(cur) ? cur : "";
+}
+
+const dlg = $("#tx-dialog"), form = $("#tx-form");
+let editingId = null;
+form.elements.type.innerHTML = Object.entries(TYPE_LABELS).map(([k, v]) => `<option value="${k}">${v}</option>`).join("");
+form.elements.delist_mode.innerHTML = Object.entries(DELIST_LABELS).map(([k, v]) => `<option value="${k}">${v}</option>`).join("");
+
+function updateFieldVisibility() {
+  const t = form.elements.type.value, acq = ACQ.includes(t), sell = t === "SELL";
+  const dl = t === "DELISTING", mode = form.elements.delist_mode.value, buyout = dl && mode === "UITKOOP";
+  const show = (cls, on) => $$(cls, form).forEach(el => { el.hidden = !on; });
+  show(".g-qty", acq || sell || buyout); show(".g-price", acq || sell || buyout);
+  show(".g-amount", t === "DIVIDEND" || t === "FEE"); show(".g-split", t === "SPLIT");
+  show(".g-ccy", t !== "SPLIT" && (!dl || buyout)); show(".g-fees", acq || sell || buyout); show(".g-reynders", sell);
+  show(".g-delist", dl);
+  $("#qty-label").firstChild.textContent = buyout ? "Aantal (leeg = volledige positie) " : "Aantal ";
+  $("#price-label").firstChild.textContent = buyout ? "Uitkoopprijs per stuk " : "Prijs per stuk ";
+  $("#delist-hint").textContent = dl ? {
+    NOTERING: "Geen belastbaar moment: je positie blijft open met dezelfde aanschaffingswaarde. Registreer een latere verkoop apart.",
+    UITKOOP: "Uitkoop, openbaar bod of squeeze-out: telt als verkoop van je stuks tegen de uitkoopprijs.",
+    WAARDELOOS: "Zonder overdracht boekt de tool geen minderwaarde (wettelijk niet uitgeklaard). Verkoop je de stuks voor een symbolische prijs, registreer dat dan als verkoop.",
+  }[mode] : "";
+  show(".g-costknown", t === "GIFT_IN" || t === "INHERIT_IN" || t === "TRANSFER_IN");
+  show(".g-hist", acq && form.elements.trade_date.value && form.elements.trade_date.value < "2026-01-01");
+  show(".g-gift", t === "GIFT_IN" || t === "INHERIT_IN");
+  form.elements.price.disabled = acq && t !== "BUY" && !form.elements.cost_known.checked;
+}
+["type", "trade_date", "cost_known", "delist_mode"].forEach(n => form.elements[n].addEventListener("change", updateFieldVisibility));
+form.elements.currency.addEventListener("input", () => { if (form.elements.currency.value.trim().toUpperCase() === "EUR") form.elements.fx_per_eur.value = "1"; });
+
+function openTxDialog(tx) {
+  form.reset();
+  editingId = tx ? tx.id : null;
+  $("#tx-title").textContent = tx ? "Transactie bewerken" : "Nieuwe transactie";
+  $("#tx-error").hidden = true;
+  $("#btn-delete-tx").hidden = !tx;
+  form.elements.owner.value = DEFAULT_OWNER;
+  if (tx) for (const [k, v] of Object.entries(tx)) {
+    const el = form.elements[k];
+    if (el && el.name) { if (el.type === "checkbox") el.checked = !!v; else el.value = v ?? ""; }
+  } else form.elements.trade_date.value = new Date().toISOString().slice(0, 10);
+  if (tx && tx.type === "DELISTING" && D(tx.quantity || 0).isZero()) form.elements.quantity.value = "";
+  updateFieldVisibility();
+  dlg.showModal();
+}
+form.addEventListener("submit", e => {
+  e.preventDefault();
+  const data = {};
+  for (const el of form.elements) {
+    if (!el.name || el.closest("[hidden]")) continue;
+    data[el.name] = el.type === "checkbox" ? el.checked : el.value.trim();
+  }
+  try {
+    const t = validateTx(data);
+    if (!state.assets[t.asset]) state.assets[t.asset] = { name: "", asset_type: "aandeel", currency: t.currency, ref_value_eur: null, ref_source: "" };
+    if (editingId) { const i = state.transactions.findIndex(x => x.id === editingId); state.transactions[i] = { ...state.transactions[i], ...t, id: editingId }; }
+    else state.transactions.push({ id: state.nextId++, ...t });
+    dlg.close(); commit();
+    toast(editingId ? "Transactie bijgewerkt" : "Transactie toegevoegd");
+  } catch (err) {
+    $("#tx-error").textContent = err instanceof InputError ? err.message : `Fout: ${err.message}`;
+    $("#tx-error").hidden = false;
+  }
+});
+$("#btn-cancel").addEventListener("click", () => dlg.close());
+$("#btn-delete-tx").addEventListener("click", async () => {
+  const id = editingId;
+  dlg.close();
+  if (await confirmDialog("Deze transactie verwijderen?")) deleteTx(id);
+});
+function deleteTx(id) {
+  state.transactions = state.transactions.filter(t => t.id !== id);
+  commit(); toast("Transactie verwijderd");
+}
+$("#tx-table").addEventListener("click", async e => {
+  const del = e.target.closest("[data-del]");
+  if (del) { e.stopPropagation(); if (await confirmDialog("Deze transactie verwijderen?")) deleteTx(Number(del.dataset.del)); return; }
+  const row = e.target.closest("tr[data-id]");
+  if (row) openTxDialog(state.transactions.find(t => t.id === Number(row.dataset.id)));
+});
+["#f-year", "#f-owner"].forEach(s => $(s).addEventListener("change", renderTransactions));
+$("#f-asset").addEventListener("input", renderTransactions);
+
+// ================================================================ activa
+function renderAssets() {
+  const list = Object.entries(state.assets).sort(([a], [b]) => a.localeCompare(b));
+  $("#asset-empty").hidden = list.length > 0;
+  const missing = list.filter(([i, a]) => needsRef(i) && (a.ref_value_eur == null || a.ref_value_eur === "")).length;
+  $("#asset-missing").hidden = !missing;
+  $("#asset-missing").textContent = `${missing === 1 ? "1 effect" : `${missing} effecten`} die je op 31/12/2025 had, ${missing === 1 ? "heeft" : "hebben"} nog geen waarde op 31/12/2025. Die is nodig zodra je ze verkoopt.`;
+  $("#asset-table tbody").innerHTML = list.map(([isin, a]) => {
+    const need = needsRef(isin), used = state.transactions.some(t => t.asset === isin);
+    return `<tr data-isin="${esc(isin)}">
+      <td><strong>${esc(isin)}</strong>${need && (a.ref_value_eur == null || a.ref_value_eur === "") ? ` <span class="badge need">waarde nodig</span>` : ""}
+        ${delistedOn(isin) ? ` <span class="badge" title="Delisting geregistreerd">geschrapt ${esc(delistedOn(isin))}</span>` : ""}</td>
+      <td><input name="name" value="${esc(a.name)}" aria-label="Naam"></td>
+      <td><select name="asset_type" aria-label="Type">${ASSET_TYPES.map(t => `<option ${t === a.asset_type ? "selected" : ""}>${t}</option>`).join("")}</select></td>
+      <td><input name="currency" value="${esc(a.currency)}" maxlength="5" class="w-sm" aria-label="Munt"></td>
+      <td><input name="ref_value_eur" inputmode="decimal" class="num" value="${esc(a.ref_value_eur ?? "")}" placeholder="${need ? "verplicht" : "n.v.t."}" aria-label="Waarde 31/12/2025"></td>
+      <td><input name="ref_source" value="${esc(a.ref_source)}" placeholder="bv. Euronext slotkoers" aria-label="Bron"></td>
+      <td class="actions-cell"><button class="btn small primary" data-save>Bewaar</button>
+        ${used ? "" : `<button class="btn small danger" data-delasset aria-label="Verwijder">✕</button>`}</td></tr>`;
+  }).join("");
+}
+$("#asset-table").addEventListener("click", async e => {
+  const row = e.target.closest("tr[data-isin]");
+  if (!row) return;
+  const isin = row.dataset.isin;
+  if (e.target.closest("[data-delasset]")) {
+    if (await confirmDialog(`Actief ${isin} verwijderen?`)) { delete state.assets[isin]; commit(); }
+    return;
+  }
+  if (!e.target.closest("[data-save]")) return;
+  const v = {}; $$("input, select", row).forEach(el => { v[el.name] = el.value.trim(); });
+  try {
+    const ref = dec(v.ref_value_eur, "waarde 31/12/2025", { nonNegative: true });
+    state.assets[isin] = { name: v.name, asset_type: v.asset_type, currency: (v.currency || "EUR").toUpperCase(), ref_value_eur: ref, ref_source: v.ref_source };
+    commit(); toast(`${isin} bewaard`);
+  } catch (err) { toast(err.message, true); }
+});
+
+// ================================================================ instellingen
+function renderSettings() {
+  $("#s-method").value = state.settings.historic_method;
+  $("#s-scope").value = state.settings.fifo_scope;
+  $("#year-table tbody").innerHTML = Object.keys(state.years).sort().map(y => yearRow(y, state.years[y])).join("");
+  $("#withheld-table tbody").innerHTML = state.withheld.length ? state.withheld
+    .slice().sort((a, b) => a.year - b.year || a.owner.localeCompare(b.owner)).map(w => `
+    <tr><td>${esc(w.owner)}</td><td>${w.year}</td><td class="num">${eur(w.amount)}</td>
+      <td class="actions-cell"><button class="btn small danger" data-delw="${esc(w.owner)}|${w.year}" aria-label="Verwijder">✕</button></td></tr>`).join("")
+    : `<tr><td colspan="4" class="muted">Geen inhoudingen ingevoerd.</td></tr>`;
+  $("#withheld-form").elements.owner.value ||= DEFAULT_OWNER;
+}
+function yearRow(year, y) {
+  return `<tr data-year="${esc(year)}"><td><strong>${esc(year)}</strong></td>
+    <td><input name="rate" class="num w-sm" value="${esc(y.rate)}" aria-label="Tarief"></td>
+    <td><input name="base_exemption" class="num" value="${esc(y.base_exemption)}" aria-label="Basisvrijstelling"></td>
+    <td><input name="carry_slice" class="num" value="${esc(y.carry_slice)}" aria-label="Overdraagbare schijf"></td>
+    <td><input name="carry_validity_years" class="num w-xs" value="${esc(y.carry_validity_years)}" aria-label="Geldigheid"></td>
+    <td><input name="source" value="${esc(y.source)}" placeholder="bron (KB/Staatsblad)" aria-label="Bron"></td>
+    <td class="actions-cell"><button class="btn small primary" data-savey>Bewaar</button>
+      <button class="btn small danger" data-dely aria-label="Verwijder">✕</button></td></tr>`;
+}
+$("#btn-save-settings").addEventListener("click", () => {
+  state.settings = { historic_method: $("#s-method").value, fifo_scope: $("#s-scope").value };
+  commit(); toast("Instellingen opgeslagen");
+});
+$("#btn-add-year").addEventListener("click", () => {
+  const ys = Object.keys(state.years).map(Number), next = (ys.length ? Math.max(...ys) : 2025) + 1;
+  $("#year-table tbody").insertAdjacentHTML("beforeend",
+    yearRow(next, { rate: "0.10", base_exemption: "", carry_slice: "1000", carry_validity_years: 5, source: "" }));
+});
+$("#year-table").addEventListener("click", async e => {
+  const row = e.target.closest("tr[data-year]"); if (!row) return;
+  const year = row.dataset.year;
+  if (e.target.closest("[data-savey]")) {
+    const v = {}; $$("input", row).forEach(el => { v[el.name] = el.value.trim(); });
+    try {
+      const rate = dec(v.rate, "tarief", { required: true, nonNegative: true });
+      if (D(rate).gt(1)) throw new InputError("Tarief als fractie invoeren (0.10 = 10%).");
+      state.years[year] = { rate, base_exemption: dec(v.base_exemption, "basisvrijstelling", { required: true, nonNegative: true }),
+        carry_slice: dec(v.carry_slice, "overdraagbare schijf", { required: true, nonNegative: true }),
+        carry_validity_years: parseInt(v.carry_validity_years, 10) || 5, source: v.source };
+      commit(); toast(`Parameters ${year} bewaard`);
+    } catch (err) { toast(err.message, true); }
+  }
+  if (e.target.closest("[data-dely]") && await confirmDialog(`Parameters voor ${year} verwijderen?`)) { delete state.years[year]; commit(); }
+});
+$("#withheld-form").addEventListener("submit", e => {
+  e.preventDefault();
+  const f = e.target, owner = f.elements.owner.value.trim() || DEFAULT_OWNER, year = parseInt(f.elements.year.value, 10);
+  try {
+    if (!(year >= 2026)) throw new InputError("Jaar moet vanaf 2026 zijn.");
+    const amount = dec(f.elements.amount.value, "bedrag", { required: true, nonNegative: true });
+    state.withheld = state.withheld.filter(w => !(w.owner === owner && w.year === year));
+    state.withheld.push({ owner, year, amount });
+    f.elements.amount.value = ""; commit(); toast("Inhouding bewaard");
+  } catch (err) { toast(err.message, true); }
+});
+$("#withheld-table").addEventListener("click", e => {
+  const b = e.target.closest("[data-delw]"); if (!b) return;
+  const [owner, year] = [b.dataset.delw.slice(0, b.dataset.delw.lastIndexOf("|")), Number(b.dataset.delw.split("|").pop())];
+  state.withheld = state.withheld.filter(w => !(w.owner === owner && w.year === year)); commit();
+});
+
+// back-up
+async function offerDownload(filename, text, fallbackLabel) {
+  const use = window.claude && window.claude.use ? window.claude.use.bind(window.claude) : null;
+  const dl = use ? await use("downloads").catch(() => null) : null;
+  if (dl) {
+    try { await dl.save({ filename, data: text }); return; }
+    catch (e) { if (e && /declin|cancel|reject/i.test(String(e.code || e.message))) return; }
+  }
+  try { await navigator.clipboard.writeText(text); toast(`${fallbackLabel} gekopieerd naar het klembord`); }
+  catch { showTextDialog(fallbackLabel, text); }
+}
+$("#btn-export").addEventListener("click", () => offerDownload(`meerwaarde-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(state, null, 1), "Back-up"));
+$("#btn-copy-backup").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText(JSON.stringify(state)); toast("Back-up gekopieerd naar het klembord"); }
+  catch { showTextDialog("Back-up", JSON.stringify(state)); }
+});
+$("#btn-csv").addEventListener("click", () => {
+  try { offerDownload("verkopen.csv", "﻿" + salesCsv(), "CSV"); } catch (e) { toast(e.message, true); }
+});
+$("#import-file").addEventListener("change", async e => {
+  const file = e.target.files[0]; if (!file) return;
+  await importBackup(await file.text()); e.target.value = "";
+});
+$("#btn-import-paste").addEventListener("click", () => importBackup($("#import-text").value));
+async function importBackup(text) {
+  let s;
+  try { s = JSON.parse(text); } catch { return toast("Dit is geen geldige back-up (JSON).", true); }
+  if (!validState(s)) return toast("Dit bestand heeft niet de vorm van een back-up van deze tool.", true);
+  if (!(await confirmDialog(`Back-up met ${s.transactions.length} transacties herstellen? Je huidige gegevens worden vervangen.`))) return;
+  state = s; state.nextId = Math.max(state.nextId || 1, ...state.transactions.map(t => t.id + 1));
+  $("#import-text").value = ""; commit(); toast("Back-up hersteld");
+}
+$("#btn-reset").addEventListener("click", async () => {
+  if (await confirmDialog("Alle gegevens wissen? Maak eerst een back-up als je ze wil bewaren.")) { state = emptyState(); commit(); toast("Alle gegevens gewist"); }
+});
+
+// ================================================================ Bolero-import
+let pendingImport = null;
+$("#import-bolero").addEventListener("change", async e => {
+  const file = e.target.files[0]; e.target.value = "";
+  if (!file) return;
+  try {
+    const buf = await file.arrayBuffer();
+    const head = new Uint8Array(buf.slice(0, 2));
+    let r;
+    if (head[0] === 0x50 && head[1] === 0x4b) r = await window.SAXO.parseSaxoFile(buf, { owner: DEFAULT_OWNER, fileName: file.name });
+    else {
+      const text = new TextDecoder().decode(buf);
+      if (/Datum transactie/.test(text)) r = window.BOLERO.parseBolero(text, { owner: DEFAULT_OWNER, fileName: file.name });
+      else if (/Instrument ISIN/i.test(text)) {
+        const first = text.split(/\r?\n/, 1)[0];
+        const rows = window.BOLERO.parseCsv(text, first.split(";").length > first.split(",").length ? ";" : ",");
+        r = window.SAXO.parseSaxoSheets({ csv: rows }, { owner: DEFAULT_OWNER, fileName: file.name });
+      } else throw new Error("Bestand niet herkend. Gebruik de Bolero-export 'Cashbewegingen' (CSV) of de Saxo-export 'Trades' (Excel).");
+    }
+    r.source ??= "bolero";
+    pendingImport = r;
+    openImportDialog(r);
+  } catch (err) { toast(err.message, true); }
+});
+function openImportDialog(r) {
+  $("#import-dialog").classList.toggle("saxo", r.source === "saxo");
+  $("#imp-title").textContent = r.source === "saxo" ? "Saxo-export importeren" : "Bolero-export importeren";
+  const dl = r.delistings || [];
+  $("#imp-delist-wrap").hidden = !dl.length;
+  $("#imp-delist tbody").innerHTML = dl.map((d, i) => `<tr data-d="${i}">
+    <td><input type="checkbox" name="add" checked aria-label="Toevoegen"></td>
+    <td><strong>${esc(d.name)}</strong><br><span class="small muted">${esc(d.asset)}</span></td>
+    <td>${esc(d.date)}</td><td class="num">${num(d.quantity)}</td>
+    <td><select name="mode">${Object.entries(DELIST_LABELS).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("")}</select></td>
+    <td><input name="price" inputmode="decimal" class="num" placeholder="EUR per stuk" disabled aria-label="Uitkoopprijs"></td></tr>`).join("");
+  const existing = new Set(state.transactions.map(t => t.import_id).filter(Boolean));
+  const fresh = r.transactions.filter(t => !existing.has(t.import_id));
+  const cnt = type => fresh.filter(t => t.type === type).length;
+  const dup = r.transactions.length - fresh.length;
+  $("#imp-summary").innerHTML = `<strong>${esc(r.fileName)}</strong>: ${r.rows} regels gelezen.
+    Nieuw: ${cnt("BUY")} aankopen, ${cnt("SELL")} verkopen, ${cnt("DIVIDEND")} dividenden.
+    ${dup ? `<br>${dup} transacties waren al eerder geïmporteerd en worden overgeslagen.` : ""}`;
+  $("#imp-skipped").innerHTML = Object.entries(r.skipped).map(([k, v]) => `<li>${esc(k)}: ${v}</li>`).join("");
+  $("#imp-owner").value = DEFAULT_OWNER;
+  $("#imp-positions tbody").innerHTML = r.positions.map((p, i) => {
+    const cur = state.assets[p.asset]?.ref_value_eur;
+    const val = cur ?? p.refHint?.value ?? "";
+    return `<tr data-i="${i}" class="${p.suspicious ? "suspicious" : ""}">
+      <td><input type="checkbox" name="keep" ${p.suspicious ? "" : "checked"} aria-label="Nog in bezit"></td>
+      <td><strong>${esc(p.asset)}</strong>${p.name ? `<br><span class="small muted">${esc(p.name)}</span>` : ""}${p.suspicious ? `<br><span class="small neg">waarschijnlijk niet meer in bezit (overname, splitsing of naamswijziging?)</span>` : ""}</td>
+      <td class="num">${num(p.quantity)}</td>
+      <td class="col-div">${esc(p.lastDividend || "–")}</td>
+      <td><input name="ref" inputmode="decimal" class="num" value="${esc(val)}" placeholder="slotkoers in EUR" aria-label="Waarde 31/12/2025">
+        <span class="hint need-hint" hidden></span>
+        ${p.refHint && cur == null ? `<span class="hint">${esc(p.refHint.from)}</span>` : ""}</td></tr>`;
+  }).join("") || `<tr><td colspan="5" class="muted">Geen posities op 31/12/2025 volgens deze export.</td></tr>`;
+  $("#imp-warnings").innerHTML = r.warnings.map(w => `<li>${esc(w)}</li>`).join("");
+  $("#imp-warn-wrap").hidden = !r.warnings.length;
+  $("#imp-warn-count").textContent = r.warnings.length;
+  $("#import-dialog").showModal();
+  markNeededRefs();
+}
+$("#imp-delist").addEventListener("change", e => {
+  const tr = e.target.closest("tr[data-d]"); if (!tr) return;
+  const buyout = $("[name=mode]", tr).value === "UITKOOP";
+  $("[name=price]", tr).disabled = !buyout || !$("[name=add]", tr).checked;
+  $("[name=mode]", tr).disabled = !$("[name=add]", tr).checked;
+  markNeededRefs();
+});
+/** Markeer posities waarvoor de waarde op 31/12/2025 nodig is: verkocht of uitgekocht in 2026+. */
+function neededRefAssets() {
+  const r = pendingImport; if (!r) return new Map();
+  const need = new Map();
+  for (const t of [...state.transactions, ...r.transactions])
+    if (t.type === "SELL" && t.trade_date >= "2026-01-01") need.set(t.asset, "nodig: verkocht in 2026 of later");
+  $$("#imp-delist tbody tr[data-d]").forEach(tr => {
+    const d = r.delistings[Number(tr.dataset.d)];
+    if ($("[name=add]", tr).checked && $("[name=mode]", tr).value === "UITKOOP") need.set(d.asset, "nodig: de uitkoop telt als verkoop");
+  });
+  return need;
+}
+function markNeededRefs() {
+  const need = neededRefAssets();
+  $$("#imp-positions tbody tr[data-i]").forEach(tr => {
+    const p = pendingImport.positions[Number(tr.dataset.i)], why = need.get(p.asset), h = $(".need-hint", tr);
+    const empty = !$("[name=ref]", tr).value.trim();
+    h.hidden = !(why && empty); h.textContent = why || ""; h.classList.toggle("neg", !!why);
+  });
+}
+$("#imp-positions").addEventListener("input", markNeededRefs);
+$("#imp-cancel").addEventListener("click", () => { $("#import-dialog").close(); pendingImport = null; });
+$("#imp-confirm").addEventListener("click", () => {
+  const r = pendingImport; if (!r) return;
+  const owner = $("#imp-owner").value.trim() || DEFAULT_OWNER;
+  try {
+    // fotowaarden valideren vóór er iets verandert
+    const decisions = $$("#imp-positions tbody tr[data-i]").map(tr => {
+      const p = r.positions[Number(tr.dataset.i)];
+      return { p, keep: $("[name=keep]", tr).checked, ref: dec($("[name=ref]", tr).value, `waarde 31/12/2025 voor ${p.asset}`, { nonNegative: true }) };
+    });
+    const delists = $$("#imp-delist tbody tr[data-d]").map(tr => {
+      const d = r.delistings[Number(tr.dataset.d)], mode = $("[name=mode]", tr).value;
+      return { d, add: $("[name=add]", tr).checked, mode,
+        price: mode === "UITKOOP" && $("[name=add]", tr).checked ? dec($("[name=price]", tr).value, `uitkoopprijs voor ${d.name}`, { required: true, nonNegative: true }) : null };
+    });
+    const existing = new Set(state.transactions.map(t => t.import_id).filter(Boolean));
+    let added = 0;
+    for (const t of r.transactions) {
+      if (existing.has(t.import_id)) continue;
+      state.transactions.push({ ...t, owner, id: state.nextId++ });
+      added++;
+    }
+    const kindMap = { stock: "aandeel", etf: "etf", etc: "ander", etn: "ander", bond: "obligatie", fund: "fonds" };
+    for (const [isin, a] of Object.entries(r.assets)) {
+      state.assets[isin] ??= { name: "", asset_type: kindMap[(a.kind || "").toLowerCase()] || "aandeel", currency: a.currency, ref_value_eur: null, ref_source: "" };
+      if (!state.assets[isin].name && a.name) state.assets[isin].name = a.name;
+    }
+    for (const { d, add, mode, price } of delists) {
+      const id = `delist:${owner}:${d.asset}:${d.date}`;
+      if (!add || state.transactions.some(t => t.import_id === id)) continue;
+      const a = state.assets[d.asset] || {};
+      state.transactions.push({ id: state.nextId++, type: "DELISTING", delist_mode: mode, trade_date: d.date, asset: d.asset,
+        quantity: "0", price: price ?? "0", currency: mode === "UITKOOP" ? "EUR" : (a.currency || "EUR"), fx_per_eur: "1", fees: "0", taxes: "0",
+        owner, broker: r.source === "saxo" ? "Saxo" : "Bolero", historic_proven: false, cost_known: true, reynders_eur: "0", amount: "0",
+        split_ratio: null, import_id: id, note: `Delisting volgens ${r.source === "saxo" ? "Saxo" : "Bolero"}-export` });
+      added++;
+    }
+    for (const t of r.transactions) if (t.type === "DIVIDEND")
+      state.assets[t.asset] ??= { name: "", asset_type: "aandeel", currency: t.currency, ref_value_eur: null, ref_source: "" };
+    for (const { p, keep, ref } of decisions) {
+      if (keep && ref != null) {
+        const a = state.assets[p.asset];
+        if (a.ref_value_eur !== ref) { a.ref_value_eur = ref; a.ref_source = p.refHint && ref === D(p.refHint.value).toString() ? p.refHint.from : (a.ref_source || "ingevoerd bij import"); }
+      }
+      const corrId = `corr:${owner}:${p.asset}`;
+      if (!keep && !state.transactions.some(t => t.import_id === corrId)) {
+        state.transactions.push({ id: state.nextId++, type: "SELL", trade_date: "2025-12-31", asset: p.asset, quantity: p.quantity, price: "0",
+          currency: "EUR", fx_per_eur: "1", fees: "0", taxes: "0", owner, broker: "Bolero", historic_proven: false, cost_known: true,
+          reynders_eur: "0", amount: "0", split_ratio: null, import_id: corrId,
+          note: "Correctie bij import: niet meer in bezit op 31/12/2025 (vóór 2026, dus geen belastbaar moment)" });
+      }
+    }
+    // door Bolero ingehouden meerwaardebelasting (kolom in de export) per jaar overnemen als er nog niets staat
+    const perYear = {};
+    for (const t of r.transactions) if (t.bolero_tax && !D(t.bolero_tax).isZero()) {
+      const y = Number(t.trade_date.slice(0, 4)); perYear[y] = (perYear[y] || D(0)).add(D(t.bolero_tax).lt(0) ? D(t.bolero_tax).neg() : D(t.bolero_tax));
+    }
+    for (const [y, amt] of Object.entries(perYear))
+      if (!state.withheld.some(w => w.owner === owner && w.year === Number(y))) state.withheld.push({ owner, year: Number(y), amount: amt.toString() });
+    const need = neededRefAssets();
+    const missing = [...need.keys()].filter(a => needsRef(a) && !(state.assets[a]?.ref_value_eur));
+    $("#import-dialog").close(); pendingImport = null;
+    commit();
+    toast(`${added} transacties geïmporteerd` + (missing.length ? `. Vul nog de waarde op 31/12/2025 in bij Activa voor: ${missing.map(a => state.assets[a]?.name || a).join(", ")}` : ""), missing.length > 0);
+  } catch (err) { toast(err.message, true); }
+});
+
+// voorbeeld
+function loadExample() {
+  const ex = [
+    { type: "BUY", trade_date: "2024-05-01", asset: "BE0003565737", quantity: "100", price: "50", historic_proven: true, broker: "Bolero" },
+    { type: "BUY", trade_date: "2025-05-01", asset: "BE0003565737", quantity: "50", price: "120", historic_proven: true, broker: "Bolero" },
+    { type: "BUY", trade_date: "2026-03-01", asset: "BE0003565737", quantity: "50", price: "90", broker: "Bolero" },
+    { type: "SELL", trade_date: "2026-09-01", asset: "BE0003565737", quantity: "120", price: "110", fees: "7.50", taxes: "4.62", broker: "Bolero" },
+    { type: "BUY", trade_date: "2026-02-01", asset: "US0378331005", quantity: "20", price: "300", currency: "USD", fx_per_eur: "1.20", broker: "Saxo" },
+    { type: "SELL", trade_date: "2026-11-01", asset: "US0378331005", quantity: "20", price: "250", currency: "USD", fx_per_eur: "1.10", broker: "Saxo" },
+    { type: "DIVIDEND", trade_date: "2026-05-01", asset: "BE0003565737", amount: "150", broker: "Bolero" },
+  ];
+  for (const raw of ex) {
+    const t = validateTx(raw);
+    state.assets[t.asset] ??= { name: "", asset_type: "aandeel", currency: t.currency, ref_value_eur: null, ref_source: "" };
+    state.transactions.push({ id: state.nextId++, ...t });
+  }
+  state.assets["BE0003565737"].name = "Voorbeeld NV";
+  state.assets["BE0003565737"].ref_value_eur = "80";
+  state.assets["BE0003565737"].ref_source = "voorbeeld";
+  state.assets["US0378331005"].name = "Voorbeeld Inc.";
+  state.assets["US0378331005"].currency = "USD";
+  state.withheld = state.withheld.filter(w => !(w.owner === DEFAULT_OWNER && w.year === 2026));
+  state.withheld.push({ owner: DEFAULT_OWNER, year: 2026, amount: "360" });
+  commit(); toast("Voorbeeld geladen. Je kunt het wissen via Instellingen.");
+}
+
+// ================================================================ dialogen en meldingen
+function confirmDialog(message) {
+  return new Promise(resolve => {
+    const d = $("#confirm-dialog");
+    $("#confirm-text").textContent = message;
+    const done = v => { d.close(); resolve(v); };
+    $("#confirm-yes").onclick = () => done(true);
+    $("#confirm-no").onclick = () => done(false);
+    d.oncancel = () => resolve(false);
+    d.showModal();
+  });
+}
+function showTextDialog(title, text) {
+  $("#text-title").textContent = title; $("#text-body").value = text; $("#text-dialog").showModal(); $("#text-body").select();
+}
+$("#text-close").addEventListener("click", () => $("#text-dialog").close());
+let toastTimer;
+function toast(msg, isError = false) {
+  const t = $("#toast"); t.textContent = msg; t.className = `toast show${isError ? " error" : ""}`;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.className = "toast"; }, isError ? 5000 : 2500);
+}
+
+// ================================================================ navigatie
+function currentTab() { const h = location.hash.slice(1); return TABS.includes(h) ? h : "rapport"; }
+function render() {
+  const tab = currentTab();
+  $$(".tabs a").forEach(a => a.classList.toggle("active", a.getAttribute("href") === `#${tab}`));
+  $$(".tab").forEach(s => s.classList.toggle("active", s.id === `tab-${tab}`));
+  ({ rapport: renderReport, transacties: renderTransactions, activa: renderAssets, instellingen: renderSettings })[tab]();
+  const missing = Object.entries(state.assets).filter(([i, a]) => needsRef(i) && (a.ref_value_eur == null || a.ref_value_eur === "")).length;
+  $("#assets-dot").hidden = !missing;
+}
+window.addEventListener("hashchange", render);
+document.addEventListener("click", e => {
+  const a = e.target.closest("[data-action]"); if (!a) return;
+  if (a.dataset.action === "new-tx") { if (currentTab() !== "transacties") location.hash = "transacties"; openTxDialog(null); }
+  if (a.dataset.action === "load-example") loadExample();
+});
+
+initStorage();
+</script>
+</body>
+</html>

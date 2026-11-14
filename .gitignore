@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# Lokale databank van de Flask-app
+*.db
+*.sqlite
+
+# Persoonlijke gegevens: nooit committen
+*.csv
+*.xlsx
+*.xls
+meerwaarde-backup-*.json
+backup*.json
+exports/
+private/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+node_modules/

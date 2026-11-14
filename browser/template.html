@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="nl-BE">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meerwaardebelasting</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f5f8b'/%3E%3Ctext x='16' y='23' font-size='19' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'%3E%E2%82%AC%3C/text%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #f5f6f8; --panel: #fff; --ink: #1b2430; --muted: #5d6978; --line: #e2e6eb;
+  --accent: #1f5f8b; --accent-soft: #e7f0f8; --pos: #146c43; --neg: #b02a37;
+  --warn-bg: #fff6e0; --warn: #7d5300; --radius: 12px;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-size: 15px; line-height: 1.45; -webkit-text-size-adjust: 100%; }
+h1, h2, h3, h4 { margin: 0; }
+h2 { font-size: 1.25rem; }
+h3 { font-size: 1.02rem; margin: 1.4rem 0 .6rem; }
+a { color: var(--accent); }
+
+.top { background: var(--panel); border-bottom: 1px solid var(--line); padding: .75rem 1rem 0; position: sticky; top: 0; z-index: 5; }
+.brand { display: flex; gap: .65rem; align-items: center; max-width: 1100px; margin: 0 auto; }
+.logo { width: 34px; height: 34px; border-radius: 9px; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 700; flex: none; }
+.brand h1 { font-size: 1.05rem; }
+.sub { margin: 0; color: var(--muted); font-size: .78rem; }
+.tabs { display: flex; gap: .1rem; margin: .5rem auto 0; overflow-x: auto; max-width: 1100px; scrollbar-width: none; }
+.tabs a { padding: .6rem .8rem; color: var(--muted); border-bottom: 2px solid transparent; text-decoration: none; white-space: nowrap; position: relative; }
+.tabs a.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.dot { position: absolute; top: .45rem; right: .25rem; width: 7px; height: 7px; border-radius: 50%; background: var(--neg); }
+
+.notice { max-width: 1100px; margin: 0 auto; padding: .5rem 1rem 0; display: flex; flex-direction: column; gap: .35rem; }
+.disclaimer, .storage { font-size: .82rem; padding: .45rem .7rem; border-radius: 8px; }
+.disclaimer { background: var(--warn-bg); color: var(--warn); }
+.storage { background: #eef2f6; color: var(--muted); }
+.storage.ok { background: #e8f4ee; color: var(--pos); }
+.storage.warn { background: var(--warn-bg); color: var(--warn); }
+.storage:empty { display: none; }
+
+main { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+.tab { display: none; } .tab.active { display: block; }
+.toolbar { display: flex; justify-content: space-between; align-items: center; gap: .5rem; margin-bottom: .7rem; flex-wrap: wrap; }
+
+.btn { border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: .5rem .9rem; border-radius: 9px; font: inherit; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: .3rem; min-height: 38px; }
+.btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn.ghost { background: transparent; }
+.btn.small { padding: .2rem .55rem; font-size: .85rem; min-height: 30px; }
+.btn.danger { color: var(--neg); }
+.btn:active { transform: translateY(1px); }
+label.btn input[type=file] { display: none; }
+
+.muted { color: var(--muted); } .small { font-size: .84rem; }
+.hint { display: block; color: var(--muted); font-size: .8rem; margin-top: .25rem; }
+.empty { color: var(--muted); text-align: center; padding: 1.5rem 0; }
+.alert { padding: .65rem .85rem; border-radius: 9px; margin: .6rem 0; }
+.alert.error { background: #fdecee; color: var(--neg); border: 1px solid #f5c2c7; }
+.alert.warn { background: var(--warn-bg); color: var(--warn); border: 1px solid #f0dfb2; }
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem; margin-bottom: 1rem; }
+.panel h3 { margin-top: 0; }
+.row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+
+.filters { display: flex; gap: .6rem; flex-wrap: wrap; margin-bottom: .7rem; align-items: flex-end; }
+.filters label { display: flex; flex-direction: column; font-size: .78rem; color: var(--muted); gap: .2rem; }
+input, select, textarea { font: inherit; font-size: 16px; padding: .45rem .55rem; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); min-width: 0; }
+input:focus, select:focus, textarea:focus { outline: 2px solid #9cc3e0; border-color: var(--accent); }
+input:disabled { background: #f1f3f5; color: var(--muted); }
+
+.table-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+th, td { padding: .5rem .6rem; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+th { background: #fafbfc; font-weight: 600; color: var(--muted); font-size: .78rem; }
+tr:last-child td { border-bottom: 0; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+td input, td select { width: 100%; min-width: 100px; font-size: 14px; }
+td input.w-sm { min-width: 64px; } td input.w-xs { min-width: 48px; }
+td.actions-cell { text-align: right; }
+tr.clickable { cursor: pointer; } tr.clickable:hover td { background: #f3f7fb; }
+
+.badge { display: inline-block; padding: .08rem .45rem; border-radius: 999px; font-size: .74rem; font-weight: 600; background: #eef2f6; color: var(--muted); }
+.badge.BUY, .badge.TRANSFER_IN, .badge.GIFT_IN, .badge.INHERIT_IN { background: var(--accent-soft); color: var(--accent); }
+.badge.SELL { background: #fdf0e6; color: #9a4700; }
+.badge.need { background: #fdecee; color: var(--neg); }
+.badge.ok { background: #e8f4ee; color: var(--pos); }
+.alert.ok { background: #e8f4ee; color: var(--pos); border: 1px solid #b9dcc8; }
+tr.suspicious td { background: #fff8f8; }
+#import-dialog.saxo .col-div { display: none; }
+.pos { color: var(--pos); } .neg { color: var(--neg); }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; margin-top: .5rem; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem; }
+.card h4 { margin: 0 0 .6rem; display: flex; justify-content: space-between; font-size: 1.05rem; }
+.kv { display: grid; grid-template-columns: 1fr auto; gap: .22rem .8rem; font-size: .9rem; margin: 0; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.kv .sep { grid-column: 1 / -1; border-top: 1px solid var(--line); margin: .3rem 0; }
+.kv .strong { font-weight: 700; color: var(--ink); }
+.big { font-size: 1.4rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.result-line { display: flex; justify-content: space-between; align-items: baseline; margin-top: .8rem; padding-top: .6rem; border-top: 1px solid var(--line); }
+
+.sales details { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: .5rem; }
+.sales summary { cursor: pointer; padding: .7rem .9rem; display: flex; gap: .3rem .8rem; align-items: center; flex-wrap: wrap; list-style: none; }
+.sales summary::-webkit-details-marker { display: none; }
+.sales summary::before { content: "▸"; color: var(--muted); }
+.sales details[open] summary::before { content: "▾"; }
+.sales summary .grow { flex: 1; }
+.sales .detail { padding: 0 .9rem .8rem; }
+.event { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: .7rem .9rem; margin-bottom: .5rem; }
+.event p { margin: .35rem 0 0; }
+
+dialog { border: 0; border-radius: 14px; padding: 0; width: min(680px, 96vw); max-height: 92vh; box-shadow: 0 20px 60px rgba(0,0,0,.25); color: var(--ink); }
+dialog::backdrop { background: rgba(20, 30, 40, .45); }
+dialog form, dialog .body { padding: 1.1rem; }
+dialog h3 { margin-top: 0; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: .1rem .7rem; }
+.field { display: flex; flex-direction: column; gap: .25rem; font-size: .84rem; color: var(--muted); margin-bottom: .55rem; }
+.check { display: flex; gap: .5rem; align-items: flex-start; font-size: .9rem; margin: .4rem 0; }
+.check input { width: 18px; height: 18px; margin-top: .1rem; flex: none; }
+.actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 1rem; flex-wrap: wrap; }
+.actions .left { margin-right: auto; }
+.inline-form { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .8rem; }
+.inline-form input { width: 130px; }
+textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; font-size: 13px; }
+.toast { position: fixed; left: 50%; bottom: 1.2rem; transform: translate(-50%, 150%); background: #1b2430; color: #fff; padding: .6rem 1rem; border-radius: 10px; font-size: .9rem; transition: transform .25s; z-index: 50; max-width: 92vw; box-shadow: 0 6px 20px rgba(0,0,0,.2); }
+.toast.show { transform: translate(-50%, 0); }
+.toast.error { background: var(--neg); }
+[hidden] { display: none !important; }
+
+@media (max-width: 600px) {
+  main { padding: .7rem; }
+  .cards { grid-template-columns: 1fr; }
+  .hide-sm { display: none; }
+  th, td { padding: .5rem .45rem; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <span class="logo" aria-hidden="true">€</span>
+    <div><h1>Meerwaardebelasting</h1><p class="sub">België · algemeen regime · wet van 6 april 2026</p></div>
+  </div>
+  <nav class="tabs">
+    <a href="#rapport">Rapport</a>
+    <a href="#transacties">Transacties</a>
+    <a href="#activa">Activa<span class="dot" id="assets-dot" hidden></span></a>
+    <a href="#instellingen">Instellingen</a>
+  </nav>
+</header>
+<div class="notice">
+  <div class="disclaimer" role="note">Rekenhulp, geen fiscaal advies. Controleer met de FOD Financiën of een adviseur.</div>
+  <div id="storage-status" class="storage" role="status"></div>
+</div>
+
+<main>
+  <section id="tab-rapport" class="tab">
+    <div class="toolbar"><h2>Rapport</h2>
+      <div class="row"><button class="btn ghost" id="btn-csv">CSV per verkoop</button>
+        <button class="btn primary" data-action="new-tx">+ Transactie</button></div></div>
+    <div id="report-error" class="alert error" hidden></div>
+    <div id="report-settings" class="muted small"></div>
+    <div id="year-cards" class="cards"></div>
+    <h3 id="sales-title">Verkopen</h3>
+    <div id="sales" class="sales"></div>
+    <h3 id="events-title" hidden>Gebeurtenissen zonder belastbaar moment</h3>
+    <div id="events"></div>
+  </section>
+
+  <section id="tab-transacties" class="tab">
+    <div class="toolbar"><h2>Transacties <span id="tx-count" class="muted small"></span></h2>
+      <div class="row">
+        <label class="btn ghost">Export importeren (Bolero/Saxo)<input type="file" id="import-bolero" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></label>
+        <button class="btn primary" data-action="new-tx">+ Nieuwe transactie</button></div></div>
+    <div class="filters">
+      <label>Jaar <select id="f-year"><option value="">Alle</option></select></label>
+      <label>Eigenaar <select id="f-owner"><option value="">Alle</option></select></label>
+      <label>Actief <input id="f-asset" placeholder="ISIN/ticker" size="12"></label>
+    </div>
+    <div class="table-wrap"><table id="tx-table"><thead><tr>
+      <th>Datum</th><th>Type</th><th>Actief</th><th class="num">Aantal</th><th class="num">Prijs / bedrag</th>
+      <th>Munt</th><th>Eigenaar</th><th>Broker</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div id="tx-empty" class="empty" hidden><p>Nog geen transacties.</p>
+      <p><button class="btn primary" data-action="new-tx">+ Eerste transactie</button>
+         <button class="btn ghost" data-action="load-example">Voorbeeld laden</button></p>
+      <p class="hint">Of importeer je export van Bolero (Cashbewegingen, CSV) of Saxo (Trades, Excel) met de knop bovenaan.</p></div>
+  </section>
+
+  <section id="tab-activa" class="tab">
+    <div class="toolbar"><h2>Activa</h2></div>
+    <p class="muted">Voor elk actief dat je vóór 1 januari 2026 verwierf, is de waarde per stuk op 31/12/2025 nodig
+      (slotkoers, omgerekend naar EUR). Activa worden automatisch toegevoegd bij een transactie.</p>
+    <div id="asset-missing" class="alert warn" hidden></div>
+    <div class="table-wrap"><table id="asset-table"><thead><tr><th>ISIN/ticker</th><th>Naam</th><th>Type</th><th>Munt</th>
+      <th class="num">Waarde 31/12/2025 (EUR/stuk)</th><th>Bron</th><th></th></tr></thead><tbody></tbody></table></div>
+    <p id="asset-empty" class="empty" hidden>Nog geen activa.</p>
+  </section>
+
+  <section id="tab-instellingen" class="tab">
+    <h2 style="margin-bottom:.8rem">Instellingen</h2>
+    <div class="panel">
+      <h3>Berekeningskeuzes</h3>
+      <label class="field">Historische aankoopprijs (activa van vóór 2026)
+        <select id="s-method"><option value="FIFO">Per lot (FIFO)</option><option value="GEMIDDELD">Gemiddelde van alle aankopen vóór 2026</option></select>
+        <span class="hint">Wettelijk niet volledig uitgeklaard. Het rapport toont het verschil met de andere methode.</span></label>
+      <label class="field">FIFO-toepassing
+        <select id="s-scope"><option value="EIGENAAR">Over alle brokers van de eigenaar</option><option value="BROKER">Per broker apart (zoals de bank rekent)</option></select></label>
+      <button class="btn primary" id="btn-save-settings">Opslaan</button>
+    </div>
+    <div class="panel">
+      <h3>Fiscale parameters per inkomstenjaar</h3>
+      <p class="hint">Voeg een jaar pas toe als het geïndexeerde bedrag officieel bekend is. Tarief als fractie (0.10 = 10%).</p>
+      <div class="table-wrap"><table id="year-table"><thead><tr><th>Jaar</th><th class="num">Tarief</th><th class="num">Basisvrijstelling</th>
+        <th class="num">Overdraagbare schijf</th><th class="num">Geldig (jaar)</th><th>Bron</th><th></th></tr></thead><tbody></tbody></table></div>
+      <p><button class="btn ghost" id="btn-add-year">+ Jaar toevoegen</button></p>
+    </div>
+    <div class="panel">
+      <h3>Ingehouden meerwaardebelasting (opt-in)</h3>
+      <p class="hint">Bedrag dat je broker aan de bron inhield, zoals op je jaaroverzicht.</p>
+      <div class="table-wrap"><table id="withheld-table"><thead><tr><th>Eigenaar</th><th>Jaar</th><th class="num">Ingehouden (EUR)</th><th></th></tr></thead><tbody></tbody></table></div>
+      <form id="withheld-form" class="inline-form">
+        <input name="owner" placeholder="Eigenaar" list="owner-list" aria-label="Eigenaar">
+        <input name="year" type="number" min="2026" value="2026" aria-label="Jaar">
+        <input name="amount" inputmode="decimal" placeholder="Bedrag" aria-label="Bedrag" required>
+        <button class="btn primary">Toevoegen</button>
+      </form>
+    </div>
+    <div class="panel">
+      <h3>Back-up</h3>
+      <p class="hint">Bewaar af en toe een back-up buiten deze pagina. Herstellen vervangt alle huidige gegevens.</p>
+      <div class="row">
+        <button class="btn" id="btn-export">Back-up downloaden</button>
+        <button class="btn ghost" id="btn-copy-backup">Back-up kopiëren</button>
+        <label class="btn ghost">Back-up herstellen uit bestand<input type="file" id="import-file" accept=".json,application/json"></label>
+      </div>
+      <details style="margin-top:.8rem"><summary class="small muted">Of plak een back-up</summary>
+        <textarea id="import-text" placeholder="Plak hier de JSON van een back-up"></textarea>
+        <p><button class="btn" id="btn-import-paste">Herstellen</button></p></details>
+      <p style="margin-top:1rem"><button class="btn small danger" id="btn-reset">Alle gegevens wissen</button></p>
+    </div>
+    <p class="hint">Rekenregels: wet van 6 april 2026 (BS 21 april 2026) en circulaire 2026/C/74. Tarief 10%; vrijstelling 2026 € 10.000;
+      overdracht van het ongebruikte deel van de eerste schijf van € 1.000, 5 jaar geldig; fotowaarde 31/12/2025; hogere bewezen
+      historische prijs tot verkopen t.e.m. 31/12/2030, nooit tot een minderwaarde; minderwaarden enkel binnen hetzelfde jaar;
+      kosten en taksen niet aftrekbaar; FIFO. Delisting: enkel een uitkoop/bod tegen prijs is een overdracht (verkoop);
+      een loutere schrapping of waardeloos worden zonder overdracht is geen belastbaar moment (eigen interpretatie, niet uitdrukkelijk geregeld).</p>
+  </section>
+</main>
+
+<dialog id="tx-dialog">
+  <form id="tx-form" novalidate>
+    <h3 id="tx-title">Nieuwe transactie</h3>
+    <div class="grid">
+      <label class="field">Type <select name="type" required></select></label>
+      <label class="field">Datum <input name="trade_date" type="date" required></label>
+      <label class="field">Actief (ISIN/ticker) <input name="asset" required autocomplete="off" autocapitalize="characters" list="asset-list"></label>
+      <label class="field">Eigenaar <input name="owner" list="owner-list"></label>
+      <label class="field">Broker <input name="broker" list="broker-list" placeholder="bv. Bolero, Saxo"></label>
+      <label class="field g-delist">Soort delisting <select name="delist_mode"></select></label>
+      <label class="field g-qty" id="qty-label">Aantal <input name="quantity" inputmode="decimal"></label>
+      <label class="field g-price" id="price-label">Prijs per stuk <input name="price" inputmode="decimal"></label>
+      <label class="field g-amount">Bedrag <input name="amount" inputmode="decimal"></label>
+      <label class="field g-split">Ratio (nieuwe stuks per oud stuk) <input name="split_ratio" inputmode="decimal" placeholder="4 = 4:1"></label>
+      <label class="field g-ccy">Munt <input name="currency" value="EUR" maxlength="5" autocapitalize="characters"></label>
+      <label class="field g-ccy">Wisselkoers (1 EUR = … munt) <input name="fx_per_eur" value="1" inputmode="decimal"></label>
+      <label class="field g-fees">Kosten <input name="fees" value="0" inputmode="decimal"></label>
+      <label class="field g-fees">Taksen (bv. beurstaks) <input name="taxes" value="0" inputmode="decimal"></label>
+      <label class="field g-reynders">Reynders-bedrag (EUR) <input name="reynders_eur" value="0" inputmode="decimal"></label>
+    </div>
+    <label class="check g-costknown"><input type="checkbox" name="cost_known" checked> Aanschaffingswaarde is gekend</label>
+    <label class="check g-hist"><input type="checkbox" name="historic_proven"> Ik kan deze aankoopprijs bewijzen (hogere historische prijs, verkopen t.e.m. 2030)</label>
+    <p class="alert warn small g-delist" id="delist-hint"></p>
+    <p class="hint g-gift">Bij schenking of erfenis: vul de datum en prijs van de oorspronkelijke eigenaar in.</p>
+    <label class="field">Notitie <input name="note"></label>
+    <p id="tx-error" class="alert error" hidden></p>
+    <div class="actions">
+      <button type="button" class="btn danger left" id="btn-delete-tx" hidden>Verwijderen</button>
+      <button type="button" class="btn ghost" id="btn-cancel">Annuleren</button>
+      <button type="submit" class="btn primary">Opslaan</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="import-dialog" style="width:min(820px,96vw)"><div class="body">
+  <h3 id="imp-title">Export importeren</h3>
+  <p id="imp-summary"></p>
+  <details><summary class="small muted">Overgeslagen regels (geldbewegingen zonder effect op de belasting)</summary><ul id="imp-skipped" class="small"></ul></details>
+  <label class="field" style="max-width:240px;margin-top:.8rem">Eigenaar <input id="imp-owner" list="owner-list"></label>
+  <h3>Posities op 31/12/2025 controleren</h3>
+  <p class="hint">De export bevat geen splitsingen, overnames, naamswijzigingen of effecten die je van een andere bank overzette.
+    Vink uit wat je op 31/12/2025 niet meer had; de tool boekt het dan uit vóór 2026 (geen belastbaar moment).
+    Vul de slotkoers op 31/12/2025 in (EUR per stuk) als je die kent; ze is pas nodig wanneer je het effect verkoopt.</p>
+  <div class="table-wrap"><table id="imp-positions"><thead><tr><th>Bezit</th><th>Effect</th><th class="num">Aantal</th>
+    <th class="col-div">Laatste dividend</th><th class="num">Waarde 31/12/2025</th></tr></thead><tbody></tbody></table></div>
+  <div id="imp-delist-wrap" hidden>
+    <h3>Delistings</h3>
+    <p class="hint">De broker meldt dat de notering van deze effecten stopte terwijl je ze nog had. Kreeg je geld voor je stuks
+      (uitkoopbod, squeeze-out)? Kies dan "Uitkoop" met de prijs per stuk: dat telt als verkoop. Weet je het niet zeker, kies
+      "Enkel schrapping" (geen belastbaar moment) en pas het later aan.</p>
+    <div class="table-wrap"><table id="imp-delist"><thead><tr><th>Toevoegen</th><th>Effect</th><th>Datum</th><th class="num">Stuks</th>
+      <th>Soort</th><th class="num">Uitkoopprijs</th></tr></thead><tbody></tbody></table></div>
+  </div>
+  <details id="imp-warn-wrap" style="margin-top:.8rem"><summary class="small">Aandachtspunten (<span id="imp-warn-count"></span>)</summary>
+    <ul id="imp-warnings" class="small"></ul></details>
+  <p class="hint">Aankopen van vóór 2026 worden gemarkeerd als "historische prijs bewijsbaar": de afrekeningen van je broker gelden als bewijs. Pas dat per transactie aan als nodig.</p>
+  <div class="actions"><button class="btn ghost" id="imp-cancel">Annuleren</button><button class="btn primary" id="imp-confirm">Importeren</button></div>
+</div></dialog>
+
+<dialog id="confirm-dialog" style="width:min(420px,92vw)"><div class="body">
+  <p id="confirm-text" style="margin-top:0"></p>
+  <div class="actions"><button class="btn ghost" id="confirm-no">Annuleren</button><button class="btn primary" id="confirm-yes">Bevestigen</button></div>
+</div></dialog>
+
+<dialog id="text-dialog"><div class="body">
+  <h3 id="text-title"></h3>
+  <p class="hint">Selecteer en kopieer de tekst hieronder.</p>
+  <textarea id="text-body" readonly style="min-height:240px"></textarea>
+  <div class="actions"><button class="btn primary" id="text-close">Sluiten</button></div>
+</div></dialog>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<datalist id="asset-list"></datalist><datalist id="owner-list"></datalist>
+<datalist id="broker-list"><option value="Bolero"><option value="Saxo"></datalist>
+
+<script>/*ENGINE*/</script>
+<script>/*BOLERO*/</script>
+<script>/*XLSX*/</script>
+<script>/*SAXO*/</script>
+<script>/*APP*/</script>
+</body>
+</html>

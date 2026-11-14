@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="nl-BE">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Meerwaardebelasting</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f5f8b'/%3E%3Ctext x='16' y='23' font-size='19' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'%3E€%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">€</span>
+      <div>
+        <h1>Meerwaardebelasting</h1>
+        <p class="sub">Algemeen regime · wet van 6 april 2026</p>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="report" class="active">Rapport</button>
+      <button role="tab" data-tab="transactions">Transacties</button>
+      <button role="tab" data-tab="assets">Activa</button>
+      <button role="tab" data-tab="settings">Instellingen</button>
+    </nav>
+  </header>
+
+  <div class="disclaimer" role="note">
+    Rekenhulp, geen fiscaal advies. Controleer met de FOD Financiën of een adviseur.
+  </div>
+
+  <main>
+    <!-- RAPPORT -->
+    <section id="tab-report" class="tab active">
+      <div class="toolbar">
+        <h2>Rapport</h2>
+        <a class="btn ghost" href="/api/report/sales.csv" download>CSV per verkoop</a>
+      </div>
+      <div id="report-error" class="alert error" hidden></div>
+      <div id="report-settings" class="muted small"></div>
+      <div id="year-cards" class="cards"></div>
+      <h3>Verkopen</h3>
+      <div id="sales" class="sales"></div>
+      <div id="warnings"></div>
+    </section>
+
+    <!-- TRANSACTIES -->
+    <section id="tab-transactions" class="tab">
+      <div class="toolbar">
+        <h2>Transacties</h2>
+        <button class="btn primary" id="btn-new-tx">+ Nieuwe transactie</button>
+      </div>
+      <div class="filters">
+        <label>Jaar <select id="f-year"><option value="">Alle</option></select></label>
+        <label>Eigenaar <select id="f-owner"><option value="">Alle</option></select></label>
+        <label>Actief <input id="f-asset" placeholder="ISIN/ticker"></label>
+      </div>
+      <div class="table-wrap"><table id="tx-table">
+        <thead><tr>
+          <th>Datum</th><th>Type</th><th>Actief</th><th class="num">Aantal</th><th class="num">Prijs / bedrag</th>
+          <th>Munt</th><th>Eigenaar</th><th>Broker</th><th></th>
+        </tr></thead>
+        <tbody></tbody>
+      </table></div>
+      <p id="tx-empty" class="empty" hidden>Nog geen transacties. Voeg er een toe met de knop hierboven.</p>
+    </section>
+
+    <!-- ACTIVA -->
+    <section id="tab-assets" class="tab">
+      <div class="toolbar"><h2>Activa</h2></div>
+      <p class="muted">Voor elk actief dat je vóór 1 januari 2026 verwierf, is de waarde per stuk op
+        31/12/2025 (slotkoers, in EUR) nodig. Activa worden automatisch toegevoegd bij een transactie.</p>
+      <div class="table-wrap"><table id="asset-table">
+        <thead><tr><th>ISIN/ticker</th><th>Naam</th><th>Type</th><th>Munt</th>
+          <th class="num">Waarde 31/12/2025 (EUR/stuk)</th><th>Bron</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+      <p id="asset-empty" class="empty" hidden>Nog geen activa.</p>
+    </section>
+
+    <!-- INSTELLINGEN -->
+    <section id="tab-settings" class="tab">
+      <h2>Instellingen</h2>
+      <div class="panel">
+        <h3>Berekeningskeuzes</h3>
+        <label class="field">Historische aankoopprijs (activa van vóór 2026)
+          <select id="s-method">
+            <option value="FIFO">Per lot (FIFO)</option>
+            <option value="GEMIDDELD">Gemiddelde van alle aankopen vóór 2026</option>
+          </select>
+          <span class="hint">Wettelijk niet volledig uitgeklaard. Het rapport toont het verschil met de andere methode.</span>
+        </label>
+        <label class="field">FIFO-toepassing
+          <select id="s-scope">
+            <option value="EIGENAAR">Over alle brokers van de eigenaar</option>
+            <option value="BROKER">Per broker apart (zoals de bank rekent)</option>
+          </select>
+        </label>
+        <button class="btn primary" id="btn-save-settings">Opslaan</button>
+      </div>
+
+      <div class="panel">
+        <h3>Fiscale parameters per inkomstenjaar</h3>
+        <p class="hint">Voeg een jaar pas toe als het geïndexeerde bedrag officieel bekend is.</p>
+        <div class="table-wrap"><table id="year-table">
+          <thead><tr><th>Jaar</th><th class="num">Tarief</th><th class="num">Basisvrijstelling</th>
+            <th class="num">Overdraagbare schijf</th><th class="num">Geldig (jaar)</th><th>Bron</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <button class="btn ghost" id="btn-add-year">+ Jaar toevoegen</button>
+      </div>
+
+      <div class="panel">
+        <h3>Ingehouden meerwaardebelasting (opt-in)</h3>
+        <p class="hint">Bedrag dat je broker aan de bron inhield, zoals op je jaaroverzicht.</p>
+        <div class="table-wrap"><table id="withheld-table">
+          <thead><tr><th>Eigenaar</th><th>Jaar</th><th class="num">Ingehouden (EUR)</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <form id="withheld-form" class="inline-form">
+          <input name="owner" placeholder="Eigenaar" value="default" required>
+          <input name="year" type="number" min="2026" placeholder="Jaar" value="2026" required>
+          <input name="amount" inputmode="decimal" placeholder="Bedrag" required>
+          <button class="btn primary">Toevoegen</button>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <!-- TRANSACTIE-DIALOOG -->
+  <dialog id="tx-dialog">
+    <form id="tx-form" method="dialog">
+      <h3 id="tx-title">Nieuwe transactie</h3>
+      <div class="grid">
+        <label class="field">Type
+          <select name="type" required></select>
+        </label>
+        <label class="field">Datum
+          <input name="trade_date" type="date" required>
+        </label>
+        <label class="field">Actief (ISIN/ticker)
+          <input name="asset" required autocomplete="off" list="asset-list">
+        </label>
+        <label class="field">Eigenaar
+          <input name="owner" value="default">
+        </label>
+        <label class="field">Broker
+          <input name="broker" list="broker-list" placeholder="bv. Bolero, Saxo">
+        </label>
+
+        <label class="field g-qty">Aantal <input name="quantity" inputmode="decimal"></label>
+        <label class="field g-price">Prijs per stuk <input name="price" inputmode="decimal"></label>
+        <label class="field g-amount">Bedrag <input name="amount" inputmode="decimal"></label>
+        <label class="field g-split">Ratio (nieuwe stuks per oud stuk) <input name="split_ratio" inputmode="decimal" placeholder="4 = 4:1"></label>
+        <label class="field g-ccy">Munt <input name="currency" value="EUR" maxlength="5"></label>
+        <label class="field g-ccy">Wisselkoers (1 EUR = … munt) <input name="fx_per_eur" value="1" inputmode="decimal"></label>
+        <label class="field g-fees">Kosten <input name="fees" value="0" inputmode="decimal"></label>
+        <label class="field g-fees">Taksen (bv. beurstaks) <input name="taxes" value="0" inputmode="decimal"></label>
+        <label class="field g-reynders">Reynders-bedrag (EUR) <input name="reynders_eur" value="0" inputmode="decimal"></label>
+      </div>
+      <label class="check g-costknown"><input type="checkbox" name="cost_known" checked> Aanschaffingswaarde is gekend</label>
+      <label class="check g-hist"><input type="checkbox" name="historic_proven"> Ik kan deze aankoopprijs bewijzen (historische prijs, verkopen t.e.m. 2030)</label>
+      <p class="hint g-gift">Bij schenking of erfenis: vul de datum en prijs van de oorspronkelijke eigenaar in.</p>
+      <label class="field">Notitie <input name="note"></label>
+      <p id="tx-error" class="alert error" hidden></p>
+      <div class="actions">
+        <button type="button" class="btn ghost" id="btn-cancel">Annuleren</button>
+        <button type="submit" class="btn primary">Opslaan</button>
+      </div>
+    </form>
+  </dialog>
+  <datalist id="asset-list"></datalist>
+  <datalist id="broker-list"><option value="Bolero"><option value="Saxo"></datalist>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
