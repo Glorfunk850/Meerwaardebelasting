@@ -1,7 +1,7 @@
 // Service worker voor de installeerbare versie (GitHub Pages).
 // Netwerk eerst, zodat je altijd de nieuwste versie krijgt; zonder verbinding de laatst bewaarde kopie.
 // Je gegevens zitten niet hierin maar in de browseropslag (localStorage) van de pagina.
-const CACHE = "meerwaarde-v2";
+const CACHE = "meerwaarde-v3";
 const SHELL = ["./", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png", "apple-touch-icon.png"];
 
 self.addEventListener("install", e => {
