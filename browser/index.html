@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Meerwaardebelasting</title>
 <meta name="theme-color" content="#1f5f8b">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f5f8b'/%3E%3Ctext x='16' y='23' font-size='19' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'%3E%E2%82%AC%3C/text%3E%3C/svg%3E">
 <style>
 :root {
@@ -2048,9 +2050,6 @@ function setupInstall() {
   const host = location.hostname;
   if (location.protocol === "file:" || /claude/i.test(host) || window.claude || !("serviceWorker" in navigator)) return;
   if (!window.isSecureContext) return;
-  for (const [rel, href] of [["manifest", "manifest.webmanifest"], ["apple-touch-icon", "apple-touch-icon.png"]]) {
-    document.head.append(Object.assign(document.createElement("link"), { rel, href }));
-  }
   navigator.serviceWorker.register("sw.js").catch(() => {});
   const panel = $("#install-panel"), hint = $("#install-hint"), btn = $("#btn-install");
   const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;

@@ -859,9 +859,6 @@ function setupInstall() {
   const host = location.hostname;
   if (location.protocol === "file:" || /claude/i.test(host) || window.claude || !("serviceWorker" in navigator)) return;
   if (!window.isSecureContext) return;
-  for (const [rel, href] of [["manifest", "manifest.webmanifest"], ["apple-touch-icon", "apple-touch-icon.png"]]) {
-    document.head.append(Object.assign(document.createElement("link"), { rel, href }));
-  }
   navigator.serviceWorker.register("sw.js").catch(() => {});
   const panel = $("#install-panel"), hint = $("#install-hint"), btn = $("#btn-install");
   const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
