@@ -1,6 +1,7 @@
 "use strict";
 /* Interface + opslag. Alle berekeningen via MWB (engine.js). */
 const { D, Dec, calculate, defaultConfig } = window.MWB;
+const AS = window.ASSETS;
 
 const TYPE_LABELS = {
   BUY: "Aankoop", SELL: "Verkoop", SPLIT: "Splitsing", DIVIDEND: "Dividend", FEE: "Kosten",
@@ -41,8 +42,10 @@ function emptyState() {
 let state = emptyState();
 
 function validState(s) {
-  return s && typeof s === "object" && Array.isArray(s.transactions) && s.assets && typeof s.assets === "object"
+  const ok = s && typeof s === "object" && Array.isArray(s.transactions) && s.assets && typeof s.assets === "object"
     && s.years && s.settings && Array.isArray(s.withheld);
+  if (ok) AS.fillNames(s); // oudere imports: naam stond enkel in de sleutel
+  return ok;
 }
 
 // ================================================================ opslag
@@ -322,7 +325,7 @@ function renderReport() {
 /** Naam als die gekend is en verschilt van de sleutel (bv. ISIN), anders de sleutel. */
 function assetLabel(id) {
   const n = state.assets[id]?.name;
-  return n && n.toUpperCase() !== id ? `${n} (${id})` : id;
+  return n && !id.includes(n.toUpperCase()) ? `${n} (${id})` : id;
 }
 function txOfSale(s) {
   const id = Number((/#(\d+)/.exec(s.source) || [])[1]);
@@ -498,10 +501,14 @@ function renderAssets() {
   $("#asset-missing").textContent = `${missing === 1 ? "1 effect" : `${missing} effecten`} die je op 31/12/2025 had, ${missing === 1 ? "heeft" : "hebben"} nog geen waarde op 31/12/2025. Die is nodig zodra je ze verkoopt.`;
   $("#asset-table tbody").innerHTML = list.map(([isin, a]) => {
     const need = needsRef(isin), u = used(isin), gone = closed([isin, a]);
+    const badges = [
+      AS.isNameKey(isin) ? `<span class="badge" title="De export bevat geen ISIN; de naam wordt als sleutel gebruikt. Vul de ISIN of ticker in en klik Bewaar.">geen ISIN</span>` : "",
+      need && (a.ref_value_eur == null || a.ref_value_eur === "") ? `<span class="badge need">waarde nodig</span>` : "",
+      delistedOn(isin) ? `<span class="badge" title="Delisting geregistreerd">geschrapt ${esc(delistedOn(isin))}</span>` : "",
+      gone ? `<span class="badge" title="Niet meer in portefeuille">afgesloten</span>` : "",
+    ].filter(Boolean).join(" ");
     return `<tr data-isin="${esc(isin)}"${gone ? ` class="muted"` : ""}>
-      <td><strong>${esc(isin)}</strong>${need && (a.ref_value_eur == null || a.ref_value_eur === "") ? ` <span class="badge need">waarde nodig</span>` : ""}
-        ${delistedOn(isin) ? ` <span class="badge" title="Delisting geregistreerd">geschrapt ${esc(delistedOn(isin))}</span>` : ""}
-        ${gone ? ` <span class="badge" title="Niet meer in portefeuille">afgesloten</span>` : ""}</td>
+      <td><input name="key" value="${esc(isin)}" class="key" aria-label="ISIN/ticker" autocapitalize="characters">${badges ? `<div class="key-badges">${badges}</div>` : ""}</td>
       <td><input name="name" value="${esc(a.name)}" aria-label="Naam"></td>
       <td><select name="asset_type" aria-label="Type">${ASSET_TYPES.map(t => `<option ${t === a.asset_type ? "selected" : ""}>${t}</option>`).join("")}</select></td>
       <td><input name="currency" value="${esc(a.currency)}" maxlength="5" class="w-sm" aria-label="Munt"></td>
@@ -533,8 +540,13 @@ $("#asset-table").addEventListener("click", async e => {
   const v = {}; $$("input, select", row).forEach(el => { v[el.name] = el.value.trim(); });
   try {
     const ref = dec(v.ref_value_eur, "waarde 31/12/2025", { nonNegative: true });
+    const key = AS.normKey(v.key);
+    if (!key) throw new InputError("ISIN/ticker mag niet leeg zijn.");
+    if (key !== isin && state.assets[key] && !(await confirmDialog(`${key} bestaat al. ${label} samenvoegen met ${key}? ` +
+        `Alle transacties van ${isin} komen dan onder ${key}.`))) return;
     state.assets[isin] = { ...state.assets[isin], name: v.name, asset_type: v.asset_type, currency: (v.currency || "EUR").toUpperCase(), ref_value_eur: ref, ref_source: v.ref_source };
-    commit(); toast(`${isin} bewaard`);
+    if (key !== isin) AS.renameAsset(state, isin, key);
+    commit(); toast(key !== isin ? `${isin} heet nu ${key}; een volgende import gebruikt ook ${key}` : `${key} bewaard`);
   } catch (err) { toast(err.message, true); }
 });
 
@@ -667,6 +679,7 @@ $("#import-bolero").addEventListener("change", async e => {
       } else throw new Error("Bestand niet herkend. Gebruik de Bolero-export 'Cashbewegingen' (CSV) of de Saxo-export 'Trades' (Excel).");
     }
     r.source ??= "bolero";
+    AS.applyAliases(r, state.aliases);
     pendingImport = r;
     openImportDialog(r);
   } catch (err) { toast(err.message, true); }

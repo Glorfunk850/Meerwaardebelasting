@@ -56,6 +56,11 @@
     n = n.replace(/\s*\(\w\w\)?\s*$/, "");
     return n.replace(/[^A-Z0-9]/g, "").slice(0, 9);
   }
+  /** Leesbare naam zonder beurscode: "VOORBEELD NV (PA)" -> "VOORBEELD NV". */
+  function displayName(raw) {
+    return String(raw).replace(/\s+/g, " ").trim().replace(/^CP\s+/i, "").replace(/\s+\d\d\.\d\d\.\d\d$/, "")
+      .replace(/\s*\(\w\w\)?\s*$/, "").trim();
+  }
   function dividendAssetName(raw) {
     let s = String(raw).replace(/\s+/g, " ").trim().replace(/^CP\s+/i, "").replace(/\s+\d\d\.\d\d\.\d\d$/, "");
     return assetName(s).id;
@@ -181,7 +186,7 @@
         };
         const pl = bnum(l.r[C.pl]), mwb = bnum(l.r[C.mwb]);
         if (isSell && pl != null) { t.bolero_result = pl.toString(); if (mwb != null) t.bolero_tax = mwb.toString(); }
-        assets[id] ??= { currency: ccy };
+        assets[id] ??= { currency: ccy, name: displayName(m[2]) };
         out.push(t);
       } else if ((m = DIVIDEND.exec(l.desc))) {
         if (amount == null) continue;
@@ -191,6 +196,7 @@
         let fx = D(1);
         if (amtCcy !== "EUR") { const f = fxFor(amtCcy, l.date); fx = f ? f.rate.round(6) : null; }
         if (fx === null) { warnings.push(`${src}: dividend ${name} in ${amtCcy} zonder wisselkoers, overgeslagen.`); continue; }
+        assets[id] ??= { currency: amtCcy, name: displayName(name) };
         const rv = bnum(l.r[C.rv]);
         out.push({
           type: "DIVIDEND", trade_date: l.date, asset: id, amount: amount.toString(), currency: amtCcy, fx_per_eur: fx.toString(),
@@ -246,7 +252,7 @@
         .map(d => d.date).sort().pop() || null;
       const activity2026 = transactions.some(t => t.asset === h.asset && t.trade_date >= "2026-01-01" && t.type !== "DIVIDEND");
       const suspicious = !activity2026 && (!last || last < "2024-07-01");
-      return { asset: h.asset, quantity: h.quantity.toString(), lastDividend: last, suspicious, refHint: refHints[h.asset] || null };
+      return { asset: h.asset, name: assets[h.asset]?.name || "", quantity: h.quantity.toString(), lastDividend: last, suspicious, refHint: refHints[h.asset] || null };
     });
     // wisselkoerswaarschuwingen enkel voor effecten die na 2025 nog meetellen
     const relevant = new Set([...held.map(h => h.asset), ...transactions.filter(t => t.trade_date >= "2026-01-01").map(t => t.asset)]);
@@ -254,6 +260,6 @@
     return { transactions, skipped, warnings, refHints, assets, positions, fileName, rows: lines.length };
   }
 
-  const api = { parseBolero, parseCsv, assetName, nameKey };
+  const api = { parseBolero, parseCsv, assetName, nameKey, displayName };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.BOLERO = api;
 })(typeof window !== "undefined" ? window : globalThis);

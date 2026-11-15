@@ -77,7 +77,7 @@ th { background: #fafbfc; font-weight: 600; color: var(--muted); font-size: .78r
 tr:last-child td { border-bottom: 0; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 td input, td select { width: 100%; min-width: 100px; font-size: 14px; }
-td input.w-sm { min-width: 64px; } td input.w-xs { min-width: 48px; }
+td input.w-sm { min-width: 64px; } td input.w-xs { min-width: 48px; } td input.key { min-width: 150px; font-weight: 600; } .key-badges { margin-top: .25rem; display: flex; flex-wrap: wrap; gap: .25rem; }
 td.actions-cell { text-align: right; }
 tr.clickable { cursor: pointer; } tr.clickable:hover td { background: #f3f7fb; }
 
@@ -731,6 +731,11 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     n = n.replace(/\s*\(\w\w\)?\s*$/, "");
     return n.replace(/[^A-Z0-9]/g, "").slice(0, 9);
   }
+  /** Leesbare naam zonder beurscode: "VOORBEELD NV (PA)" -> "VOORBEELD NV". */
+  function displayName(raw) {
+    return String(raw).replace(/\s+/g, " ").trim().replace(/^CP\s+/i, "").replace(/\s+\d\d\.\d\d\.\d\d$/, "")
+      .replace(/\s*\(\w\w\)?\s*$/, "").trim();
+  }
   function dividendAssetName(raw) {
     let s = String(raw).replace(/\s+/g, " ").trim().replace(/^CP\s+/i, "").replace(/\s+\d\d\.\d\d\.\d\d$/, "");
     return assetName(s).id;
@@ -856,7 +861,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
         };
         const pl = bnum(l.r[C.pl]), mwb = bnum(l.r[C.mwb]);
         if (isSell && pl != null) { t.bolero_result = pl.toString(); if (mwb != null) t.bolero_tax = mwb.toString(); }
-        assets[id] ??= { currency: ccy };
+        assets[id] ??= { currency: ccy, name: displayName(m[2]) };
         out.push(t);
       } else if ((m = DIVIDEND.exec(l.desc))) {
         if (amount == null) continue;
@@ -866,6 +871,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
         let fx = D(1);
         if (amtCcy !== "EUR") { const f = fxFor(amtCcy, l.date); fx = f ? f.rate.round(6) : null; }
         if (fx === null) { warnings.push(`${src}: dividend ${name} in ${amtCcy} zonder wisselkoers, overgeslagen.`); continue; }
+        assets[id] ??= { currency: amtCcy, name: displayName(name) };
         const rv = bnum(l.r[C.rv]);
         out.push({
           type: "DIVIDEND", trade_date: l.date, asset: id, amount: amount.toString(), currency: amtCcy, fx_per_eur: fx.toString(),
@@ -921,7 +927,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
         .map(d => d.date).sort().pop() || null;
       const activity2026 = transactions.some(t => t.asset === h.asset && t.trade_date >= "2026-01-01" && t.type !== "DIVIDEND");
       const suspicious = !activity2026 && (!last || last < "2024-07-01");
-      return { asset: h.asset, quantity: h.quantity.toString(), lastDividend: last, suspicious, refHint: refHints[h.asset] || null };
+      return { asset: h.asset, name: assets[h.asset]?.name || "", quantity: h.quantity.toString(), lastDividend: last, suspicious, refHint: refHints[h.asset] || null };
     });
     // wisselkoerswaarschuwingen enkel voor effecten die na 2025 nog meetellen
     const relevant = new Set([...held.map(h => h.asset), ...transactions.filter(t => t.trade_date >= "2026-01-01").map(t => t.asset)]);
@@ -929,8 +935,94 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     return { transactions, skipped, warnings, refHints, assets, positions, fileName, rows: lines.length };
   }
 
-  const api = { parseBolero, parseCsv, assetName, nameKey };
+  const api = { parseBolero, parseCsv, assetName, nameKey, displayName };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.BOLERO = api;
+})(typeof window !== "undefined" ? window : globalThis);
+</script>
+<script>/* Beheer van de sleutels van activa (ISIN/ticker) los van de naam.
+ * De Bolero-export bevat geen ISIN's: daar wordt de naam (met beurscode) als sleutel gebruikt.
+ * De gebruiker kan die sleutel achteraf vervangen door de ISIN of ticker; de oude sleutel blijft
+ * als alias bewaard zodat een latere import van hetzelfde bestand op hetzelfde actief terechtkomt. */
+(function (root) {
+  "use strict";
+
+  const isIsin = k => /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(String(k || ""));
+  /** Sleutel die uit een naam bestaat (Bolero, of Saxo zonder ISIN): bevat een spatie of beurscode. */
+  const isNameKey = k => !isIsin(k) && /\s/.test(String(k || ""));
+  /** "VOORBEELD NV (PA)" -> "VOORBEELD NV" */
+  const nameFromKey = k => String(k).replace(/\s*\(\w\w\)$/, "").trim();
+
+  /** Vul ontbrekende namen in voor activa waarvan de sleutel zelf een naam is. Geeft het aantal terug. */
+  function fillNames(state) {
+    let n = 0;
+    for (const [k, a] of Object.entries(state.assets || {}))
+      if (a && !a.name && isNameKey(k)) { a.name = nameFromKey(k); n++; }
+    return n;
+  }
+
+  const resolve = (aliases, k) => {
+    const seen = new Set();
+    while (aliases && aliases[k] && !seen.has(k)) { seen.add(k); k = aliases[k]; }
+    return k;
+  };
+
+  /** Zet de sleutels in een importresultaat om volgens de aliassen (in place). */
+  function applyAliases(r, aliases) {
+    if (!aliases || !Object.keys(aliases).length) return r;
+    const map = k => resolve(aliases, k);
+    for (const t of r.transactions || []) t.asset = map(t.asset);
+    for (const p of r.positions || []) p.asset = map(p.asset);
+    for (const d of r.delistings || []) d.asset = map(d.asset);
+    const remap = obj => {
+      if (!obj) return obj;
+      const out = {};
+      for (const [k, v] of Object.entries(obj)) { const nk = map(k); out[nk] ??= v; }
+      return out;
+    };
+    r.assets = remap(r.assets);
+    r.refHints = remap(r.refHints);
+    return r;
+  }
+
+  /** Normaliseer een door de gebruiker ingevoerde sleutel. */
+  const normKey = k => String(k || "").replace(/\s+/g, " ").trim().toUpperCase();
+
+  /**
+   * Hernoem sleutel `from` naar `to` in de hele toestand: activa, transacties, import-id's van
+   * correcties/delistings en aliassen. Bestaat `to` al, dan worden beide samengevoegd (velden van
+   * `to` hebben voorrang, lege velden worden aangevuld). Geeft het aantal aangepaste transacties terug.
+   */
+  function renameAsset(state, from, to) {
+    to = normKey(to);
+    if (!to) throw new Error("ISIN/ticker mag niet leeg zijn.");
+    if (from === to) return 0;
+    const src = state.assets[from] || {};
+    const dst = state.assets[to];
+    const merged = { ...src };
+    if (dst) for (const [k, v] of Object.entries(dst)) if (v != null && v !== "") merged[k] = v;
+    if (!merged.name && isNameKey(from)) merged.name = nameFromKey(from);
+    if (dst && !dst.hidden) delete merged.hidden;
+    delete state.assets[from];
+    state.assets[to] = merged;
+
+    let n = 0;
+    for (const t of state.transactions) {
+      if (t.asset === from) { t.asset = to; n++; }
+      if (typeof t.import_id === "string") {
+        if (t.import_id === `corr:${t.owner}:${from}`) t.import_id = `corr:${t.owner}:${to}`;
+        else if (t.import_id.startsWith(`delist:${t.owner}:${from}:`))
+          t.import_id = `delist:${t.owner}:${to}:` + t.import_id.slice(`delist:${t.owner}:${from}:`.length);
+      }
+    }
+    state.aliases ??= {};
+    for (const [k, v] of Object.entries(state.aliases)) if (v === from) state.aliases[k] = to;
+    delete state.aliases[to];
+    state.aliases[from] = to;
+    return n;
+  }
+
+  const api = { isIsin, isNameKey, nameFromKey, fillNames, applyAliases, renameAsset, normKey };
+  if (typeof module !== "undefined" && module.exports) module.exports = api; else root.ASSETS = api;
 })(typeof window !== "undefined" ? window : globalThis);
 </script>
 <script>/* Minimale .xlsx-lezer: zip uitpakken (DecompressionStream) en werkbladen als rijen teruggeven.
@@ -1194,6 +1286,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
 <script>"use strict";
 /* Interface + opslag. Alle berekeningen via MWB (engine.js). */
 const { D, Dec, calculate, defaultConfig } = window.MWB;
+const AS = window.ASSETS;
 
 const TYPE_LABELS = {
   BUY: "Aankoop", SELL: "Verkoop", SPLIT: "Splitsing", DIVIDEND: "Dividend", FEE: "Kosten",
@@ -1234,8 +1327,10 @@ function emptyState() {
 let state = emptyState();
 
 function validState(s) {
-  return s && typeof s === "object" && Array.isArray(s.transactions) && s.assets && typeof s.assets === "object"
+  const ok = s && typeof s === "object" && Array.isArray(s.transactions) && s.assets && typeof s.assets === "object"
     && s.years && s.settings && Array.isArray(s.withheld);
+  if (ok) AS.fillNames(s); // oudere imports: naam stond enkel in de sleutel
+  return ok;
 }
 
 // ================================================================ opslag
@@ -1515,7 +1610,7 @@ function renderReport() {
 /** Naam als die gekend is en verschilt van de sleutel (bv. ISIN), anders de sleutel. */
 function assetLabel(id) {
   const n = state.assets[id]?.name;
-  return n && n.toUpperCase() !== id ? `${n} (${id})` : id;
+  return n && !id.includes(n.toUpperCase()) ? `${n} (${id})` : id;
 }
 function txOfSale(s) {
   const id = Number((/#(\d+)/.exec(s.source) || [])[1]);
@@ -1691,10 +1786,14 @@ function renderAssets() {
   $("#asset-missing").textContent = `${missing === 1 ? "1 effect" : `${missing} effecten`} die je op 31/12/2025 had, ${missing === 1 ? "heeft" : "hebben"} nog geen waarde op 31/12/2025. Die is nodig zodra je ze verkoopt.`;
   $("#asset-table tbody").innerHTML = list.map(([isin, a]) => {
     const need = needsRef(isin), u = used(isin), gone = closed([isin, a]);
+    const badges = [
+      AS.isNameKey(isin) ? `<span class="badge" title="De export bevat geen ISIN; de naam wordt als sleutel gebruikt. Vul de ISIN of ticker in en klik Bewaar.">geen ISIN</span>` : "",
+      need && (a.ref_value_eur == null || a.ref_value_eur === "") ? `<span class="badge need">waarde nodig</span>` : "",
+      delistedOn(isin) ? `<span class="badge" title="Delisting geregistreerd">geschrapt ${esc(delistedOn(isin))}</span>` : "",
+      gone ? `<span class="badge" title="Niet meer in portefeuille">afgesloten</span>` : "",
+    ].filter(Boolean).join(" ");
     return `<tr data-isin="${esc(isin)}"${gone ? ` class="muted"` : ""}>
-      <td><strong>${esc(isin)}</strong>${need && (a.ref_value_eur == null || a.ref_value_eur === "") ? ` <span class="badge need">waarde nodig</span>` : ""}
-        ${delistedOn(isin) ? ` <span class="badge" title="Delisting geregistreerd">geschrapt ${esc(delistedOn(isin))}</span>` : ""}
-        ${gone ? ` <span class="badge" title="Niet meer in portefeuille">afgesloten</span>` : ""}</td>
+      <td><input name="key" value="${esc(isin)}" class="key" aria-label="ISIN/ticker" autocapitalize="characters">${badges ? `<div class="key-badges">${badges}</div>` : ""}</td>
       <td><input name="name" value="${esc(a.name)}" aria-label="Naam"></td>
       <td><select name="asset_type" aria-label="Type">${ASSET_TYPES.map(t => `<option ${t === a.asset_type ? "selected" : ""}>${t}</option>`).join("")}</select></td>
       <td><input name="currency" value="${esc(a.currency)}" maxlength="5" class="w-sm" aria-label="Munt"></td>
@@ -1726,8 +1825,13 @@ $("#asset-table").addEventListener("click", async e => {
   const v = {}; $$("input, select", row).forEach(el => { v[el.name] = el.value.trim(); });
   try {
     const ref = dec(v.ref_value_eur, "waarde 31/12/2025", { nonNegative: true });
+    const key = AS.normKey(v.key);
+    if (!key) throw new InputError("ISIN/ticker mag niet leeg zijn.");
+    if (key !== isin && state.assets[key] && !(await confirmDialog(`${key} bestaat al. ${label} samenvoegen met ${key}? ` +
+        `Alle transacties van ${isin} komen dan onder ${key}.`))) return;
     state.assets[isin] = { ...state.assets[isin], name: v.name, asset_type: v.asset_type, currency: (v.currency || "EUR").toUpperCase(), ref_value_eur: ref, ref_source: v.ref_source };
-    commit(); toast(`${isin} bewaard`);
+    if (key !== isin) AS.renameAsset(state, isin, key);
+    commit(); toast(key !== isin ? `${isin} heet nu ${key}; een volgende import gebruikt ook ${key}` : `${key} bewaard`);
   } catch (err) { toast(err.message, true); }
 });
 
@@ -1860,6 +1964,7 @@ $("#import-bolero").addEventListener("change", async e => {
       } else throw new Error("Bestand niet herkend. Gebruik de Bolero-export 'Cashbewegingen' (CSV) of de Saxo-export 'Trades' (Excel).");
     }
     r.source ??= "bolero";
+    AS.applyAliases(r, state.aliases);
     pendingImport = r;
     openImportDialog(r);
   } catch (err) { toast(err.message, true); }
