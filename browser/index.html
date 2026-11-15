@@ -2033,6 +2033,16 @@ document.addEventListener("click", e => {
   if (a.dataset.action === "load-example") loadExample();
 });
 
+/** Uitleg per browser: de installeerknop verschijnt pas als de browser dat toelaat. */
+function installHint(ua, platform, touch) {
+  if (/iphone|ipad|ipod/i.test(ua) || (platform === "MacIntel" && touch > 1)) return "In Safari: tik op Deel (vierkant met pijl) en kies 'Zet op beginscherm'.";
+  if (/Edg\//.test(ua)) return "In Edge: klik op het icoon 'App beschikbaar' rechts in de adresbalk, of open het menu (…) → Apps → 'Deze site installeren als app'.";
+  if (/Firefox\//.test(ua)) return "Firefox kan deze tool niet als app installeren. Open de link in Edge of Chrome om te installeren.";
+  if (/Chrome\//.test(ua)) return "In Chrome: klik op het installeericoon rechts in de adresbalk, of open het menu (⋮) → Opslaan en delen → 'Pagina installeren als app'.";
+  if (/Safari\//.test(ua) && /Mac/.test(platform)) return "In Safari op de Mac: menu Archief → 'Voeg toe aan Dock'.";
+  return "Gebruik 'App installeren' in de adresbalk of het menu van je browser. Werkt daarna ook zonder internet.";
+}
+
 // ================================================================ installeerbare app (enkel op een eigen adres, niet op claude.ai)
 function setupInstall() {
   const host = location.hostname;
@@ -2046,9 +2056,7 @@ function setupInstall() {
   const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
   panel.hidden = false;
   if (standalone) { hint.textContent = "Geïnstalleerd: je werkt in de app. Gegevens blijven in deze browser; maak regelmatig een back-up."; return; }
-  hint.textContent = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
-    ? "In Safari: tik op Deel en kies 'Zet op beginscherm'."
-    : "Gebruik in je browser 'App installeren' (in de adresbalk of het menu). Werkt daarna ook zonder internet.";
+  hint.textContent = installHint(navigator.userAgent, navigator.platform, navigator.maxTouchPoints);
   let deferred = null;
   window.addEventListener("beforeinstallprompt", e => {
     e.preventDefault(); deferred = e; btn.hidden = false;
