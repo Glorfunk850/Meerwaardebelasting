@@ -19,7 +19,7 @@ Rekenhulp voor de Belgische meerwaardebelasting (zie README.md). Communicatie me
 ## Tests
 ```bash
 cd python && python3 -m pytest -q
-cd browser && node --test engine.test.js bolero.test.js saxo.test.js
+cd browser && node --test engine.test.js bolero.test.js saxo.test.js bewijs.test.js
 ```
 
 ## Privacy

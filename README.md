@@ -35,7 +35,7 @@ Open punten staan in de README van elke versie.
 ```bash
 # browserversie
 cd browser && python3 build.py && python3 -m http.server   # http://localhost:8000
-node --test engine.test.js bolero.test.js saxo.test.js
+node --test engine.test.js bolero.test.js saxo.test.js bewijs.test.js
 
 # Python-versie
 cd python && pip install -r requirements.txt

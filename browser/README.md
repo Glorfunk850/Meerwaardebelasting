@@ -15,6 +15,7 @@ De versie die op je claude.ai-link draait. Alles werkt in de browser; er is geen
 | `bolero.js` | Importer voor de Bolero-export "Cashbewegingen" (CSV) |
 | `saxo.js` | Importer voor de Saxo-export "Trades" (Excel of CSV) |
 | `xlsx.js` | Minimale Excel-lezer zonder externe bibliotheek |
+| `bewijs.js` | Bewijsstukken bij transacties: toegelaten bestandstypes, welke transacties nog een bewijs missen |
 | `build.py` | Voegt alles samen tot `index.html` |
 | `manifest.webmanifest`, `sw.js`, `icon*` | Installeerbare app (PWA) op GitHub Pages; niet gebruikt op claude.ai |
 | `*.test.js` | Tests (Node 18+) |
@@ -26,6 +27,7 @@ python3 build.py                 # maakt index.html
 node --test engine.test.js       # rekenkern
 node --test bolero.test.js       # Bolero-importer (synthetisch bestand)
 node --test saxo.test.js         # Saxo-importer (synthetisch bestand)
+node --test bewijs.test.js       # bewijsstukken
 
 # optioneel tegen je eigen exports:
 BOLERO_FILE=pad/naar/cashmovements.csv node --test bolero.test.js
@@ -45,6 +47,16 @@ bewaarde kopie. Verhoog `CACHE` in `sw.js` als je de lijst met bestanden wijzigt
 Gegevens staan in die versie alleen in de browser (localStorage), los van de claude.ai-pagina. Overzetten gaat via
 Instellingen → Back-up downloaden en Back-up herstellen. Op claude.ai en bij een lokaal geopend bestand doet de
 installatiecode niets.
+
+## Bewijsstukken
+
+Bij elke transactie kun je bestanden toevoegen (PDF, JPG, PNG, WEBP, GIF, TXT, CSV; max. 20 MB per bestand), bv. het
+borderel of de afrekening van de bank. Op claude.ai staan ze bij de pagina in je Claude-account (capability `assets`,
+even privé als de pagina); elders in de browser (IndexedDB). De transactie bewaart enkel naam, type, grootte en
+verwijzing, dus de back-up bevat de bestanden zelf niet. Bestanden van de ene plaats zijn op de andere niet te openen.
+
+De filter *Bewijs ontbreekt* toont verwervingen van activa die nog in bezit zijn en verkopen die belastbaar zijn
+(vanaf 2026) of van activa die nog in bezit zijn, zonder bewijsstuk.
 
 ## Eigen keuzes en interpretaties
 

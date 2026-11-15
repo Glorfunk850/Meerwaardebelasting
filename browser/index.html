@@ -128,6 +128,13 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
 .toast.show { transform: translate(-50%, 0); }
 .toast.error { background: var(--neg); }
 [hidden] { display: none !important; }
+.proofs { border: 1px solid var(--line); border-radius: 10px; padding: .55rem .7rem; margin: .5rem 0; }
+.proofs .row { justify-content: space-between; }
+.proofs ul { list-style: none; margin: .4rem 0 0; padding: 0; }
+.proofs li { display: flex; gap: .5rem; align-items: center; padding: .25rem 0; border-top: 1px solid var(--line); font-size: .9rem; }
+.proofs li:first-child { border-top: 0; }
+.proofs li a, .proofs li .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.proofs li.busy { opacity: .6; }
 
 @media (max-width: 600px) {
   main { padding: .7rem; }
@@ -178,7 +185,10 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
       <label>Jaar <select id="f-year"><option value="">Alle</option></select></label>
       <label>Eigenaar <select id="f-owner"><option value="">Alle</option></select></label>
       <label>Actief <input id="f-asset" placeholder="naam" size="12"></label>
+      <label>Bewijs <select id="f-proof"><option value="">Alle</option><option value="met">Met bewijs</option>
+        <option value="zonder">Bewijs ontbreekt</option></select></label>
     </div>
+    <p id="proof-missing" class="hint" hidden></p>
     <div class="table-wrap"><table id="tx-table"><thead><tr>
       <th>Datum</th><th>Type</th><th>Actief</th><th class="num">Aantal</th><th class="num">Prijs / bedrag</th>
       <th>Munt</th><th>Eigenaar</th><th>Broker</th><th></th></tr></thead><tbody></tbody></table></div>
@@ -231,7 +241,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     </div>
     <div class="panel">
       <h3>Back-up</h3>
-      <p class="hint">Bewaar af en toe een back-up buiten deze pagina. Herstellen vervangt alle huidige gegevens.</p>
+      <p class="hint">Bewaar af en toe een back-up buiten deze pagina. Herstellen vervangt alle huidige gegevens. De back-up bevat de namen van je bewijsstukken, niet de bestanden zelf: bewaar die ook apart.</p>
       <div class="row">
         <button class="btn" id="btn-export">Back-up downloaden</button>
         <button class="btn ghost" id="btn-copy-backup">Back-up kopiëren</button>
@@ -280,6 +290,12 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     <p class="alert warn small g-delist" id="delist-hint"></p>
     <p class="hint g-gift">Bij schenking of erfenis: vul de datum en prijs van de oorspronkelijke eigenaar in.</p>
     <label class="field">Notitie <input name="note"></label>
+    <div class="proofs">
+      <div class="row"><strong>Bewijsstukken</strong>
+        <label class="btn small ghost" id="proof-add">+ Bestand toevoegen<input type="file" id="proof-file" multiple></label></div>
+      <ul id="proof-list"></ul>
+      <p class="hint" id="proof-hint"></p>
+    </div>
     <p id="tx-error" class="alert error" hidden></p>
     <div class="actions">
       <button type="button" class="btn danger left" id="btn-delete-tx" hidden>Verwijderen</button>
@@ -317,6 +333,12 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
 <dialog id="confirm-dialog" style="width:min(420px,92vw)"><div class="body">
   <p id="confirm-text" style="margin-top:0"></p>
   <div class="actions"><button class="btn ghost" id="confirm-no">Annuleren</button><button class="btn primary" id="confirm-yes">Bevestigen</button></div>
+</div></dialog>
+
+<dialog id="preview-dialog" style="width:min(900px,96vw)"><div class="body">
+  <h3 id="preview-title"></h3>
+  <img id="preview-img" alt="Bewijsstuk" style="max-width:100%;max-height:75vh;display:block;margin:0 auto">
+  <div class="actions"><button type="button" class="btn" id="preview-close">Sluiten</button></div>
 </div></dialog>
 
 <dialog id="text-dialog"><div class="body">
@@ -1234,6 +1256,76 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
 })(typeof window !== "undefined" ? window : globalThis);
 </script>
 <script>"use strict";
+/*
+ * Bewijsstukken (bijlagen) bij transacties: zuivere hulpfuncties, los van de opslag.
+ * Een bijlage in de toestand: { id, name, type, size, added, store } met store "account" (claude.ai-pagina,
+ * bestand bij de pagina zelf) of "browser" (IndexedDB, buiten claude.ai). Het bestand zelf zit nooit in de JSON.
+ */
+(function (root) {
+  const MAX_BYTES = 20 * 1024 * 1024; // limiet per bestand van de claude.ai-opslag
+  const TYPES = {
+    pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
+    txt: "text/plain", csv: "text/csv", json: "application/json", md: "text/markdown",
+  };
+  const ACCEPT = Object.keys(TYPES).map(e => "." + e).join(",") + "," + [...new Set(Object.values(TYPES))].join(",");
+  const ACQ = ["BUY", "TRANSFER_IN", "GIFT_IN", "INHERIT_IN"];
+
+  /** Inhoudstype op basis van de extensie (de browser geeft soms een leeg of afwijkend type); null = niet toegelaten. */
+  function contentType(name, browserType) {
+    const ext = String(name || "").toLowerCase().split(".").pop();
+    if (TYPES[ext]) return TYPES[ext];
+    const t = String(browserType || "").split(";")[0].trim().toLowerCase();
+    return Object.values(TYPES).includes(t) ? t : null;
+  }
+
+  /** Controle vóór het opslaan; geeft een foutmelding of null. */
+  function checkFile(name, browserType, size) {
+    if (!contentType(name, browserType))
+      return `'${name}': dit bestandstype kan niet bewaard worden. Gebruik PDF, een foto (JPG, PNG, WEBP, GIF) of tekst (TXT, CSV).`;
+    if (!size) return `'${name}' is leeg.`;
+    if (size > MAX_BYTES) return `'${name}' is groter dan 20 MB.`;
+    return null;
+  }
+
+  function sizeLabel(n) {
+    if (n == null) return "";
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${Math.round(n / 1024)} kB`;
+    return `${(n / 1024 / 1024).toFixed(1).replace(".", ",")} MB`;
+  }
+
+  /**
+   * Transacties die een bewijs zouden moeten hebben maar er geen hebben: verwervingen (aankoop, overdracht,
+   * schenking, erfenis) en verkopen van activa die (per eigenaar) nog in bezit zijn, plus alle verkopen
+   * vanaf 2026 (belastbaar moment). heldKeys = Set van `${owner}\u0000${asset}`.
+   */
+  function missingProof(transactions, heldKeys) {
+    return transactions.filter(t => {
+      if ((t.attachments || []).length) return false;
+      const held = heldKeys.has(`${t.owner}\u0000${t.asset}`);
+      if (ACQ.includes(t.type)) return held;
+      if (t.type === "SELL" || (t.type === "DELISTING" && t.delist_mode === "UITKOOP"))
+        return held || t.trade_date >= "2026-01-01";
+      return false;
+    });
+  }
+
+  /** Bijlagen die na het bewerken niet meer gebruikt worden (om de bestanden zelf te verwijderen). */
+  function removedAttachments(before, after) {
+    const keep = new Set((after || []).map(a => a.id));
+    return (before || []).filter(a => !keep.has(a.id));
+  }
+
+  /** Alle bijlagen waar nog een transactie naar verwijst. */
+  function usedIds(transactions) {
+    return new Set(transactions.flatMap(t => (t.attachments || []).map(a => a.id)));
+  }
+
+  const api = { MAX_BYTES, ACCEPT, contentType, checkFile, sizeLabel, missingProof, removedAttachments, usedIds };
+  if (typeof module !== "undefined" && module.exports) module.exports = api; else root.BEWIJS = api;
+})(typeof window !== "undefined" ? window : globalThis);
+</script>
+<script>"use strict";
 /* Interface + opslag. Alle berekeningen via MWB (engine.js). */
 const { D, Dec, calculate, defaultConfig } = window.MWB;
 
@@ -1599,8 +1691,13 @@ function renderTransactions() {
   fillFilter("#f-owner", [...new Set(all.map(t => t.owner))].sort());
   $("#asset-list").innerHTML = Object.keys(state.assets).map(a => `<option value="${esc(a)}">`).join("");
   $("#owner-list").innerHTML = [...new Set([DEFAULT_OWNER, ...all.map(t => t.owner)])].map(o => `<option value="${esc(o)}">`).join("");
-  const fy = $("#f-year").value, fo = $("#f-owner").value, fa = $("#f-asset").value.trim().toUpperCase();
-  const rows = all.filter(t => (!fy || t.trade_date.startsWith(fy)) && (!fo || t.owner === fo) && (!fa || t.asset.includes(fa)))
+  const fy = $("#f-year").value, fo = $("#f-owner").value, fa = $("#f-asset").value.trim().toUpperCase(), fp = $("#f-proof").value;
+  const missing = new Set(window.BEWIJS.missingProof(all, heldKeys()).map(t => t.id));
+  $("#proof-missing").hidden = !missing.size || fp === "zonder";
+  $("#proof-missing").textContent = `${missing.size === 1 ? "1 transactie" : `${missing.size} transacties`} van activa in bezit of belastbare verkopen ${missing.size === 1 ? "heeft" : "hebben"} nog geen bewijsstuk. Kies 'Bewijs ontbreekt' om ze te tonen.`;
+  const hasProof = t => (t.attachments || []).length > 0;
+  const rows = all.filter(t => (!fy || t.trade_date.startsWith(fy)) && (!fo || t.owner === fo) && (!fa || t.asset.includes(fa))
+      && (!fp || (fp === "met" ? hasProof(t) : missing.has(t.id))))
     .sort((a, b) => a.trade_date < b.trade_date ? 1 : a.trade_date > b.trade_date ? -1 : b.id - a.id);
   $("#tx-empty").hidden = rows.length > 0;
   $("#tx-count").textContent = all.length ? `${rows.length} van ${all.length}` : "";
@@ -1614,7 +1711,8 @@ function renderTransactions() {
       <td><span class="badge ${esc(t.type)}">${esc(TYPE_LABELS[t.type])}</span>
         ${t.historic_proven ? `<span class="badge" title="Historische prijs bewijsbaar">H</span>` : ""}
         ${!t.cost_known ? `<span class="badge need" title="Aanschaffingswaarde onbekend">?</span>` : ""}
-        ${t.type === "DELISTING" ? `<span class="badge">${esc(DELIST_SHORT[t.delist_mode] || "")}</span>` : ""}</td>
+        ${t.type === "DELISTING" ? `<span class="badge">${esc(DELIST_SHORT[t.delist_mode] || "")}</span>` : ""}
+        ${hasProof(t) ? `<span class="badge ok" title="Bewijsstukken">📎 ${t.attachments.length}</span>` : missing.has(t.id) ? `<span class="badge need" title="Nog geen bewijsstuk">geen bewijs</span>` : ""}</td>
       <td>${esc(t.asset)}</td>
       <td class="num">${["SPLIT", "DIVIDEND", "FEE"].includes(t.type) || (t.type === "DELISTING" && D(t.quantity || 0).isZero()) ? "" : num(t.quantity)}</td>
       <td class="num">${value}</td>
@@ -1670,6 +1768,7 @@ function openTxDialog(tx) {
   } else form.elements.trade_date.value = new Date().toISOString().slice(0, 10);
   if (tx && tx.type === "DELISTING" && D(tx.quantity || 0).isZero()) form.elements.quantity.value = "";
   updateFieldVisibility();
+  openProofs(tx);
   dlg.showModal();
 }
 form.addEventListener("submit", e => {
@@ -1682,8 +1781,15 @@ form.addEventListener("submit", e => {
   try {
     const t = validateTx(data);
     if (!state.assets[t.asset]) state.assets[t.asset] = { name: "", asset_type: "aandeel", currency: t.currency, ref_value_eur: null, ref_source: "" };
-    if (editingId) { const i = state.transactions.findIndex(x => x.id === editingId); state.transactions[i] = { ...state.transactions[i], ...t, id: editingId }; }
-    else state.transactions.push({ id: state.nextId++, ...t });
+    if (proofDraft.uploading) throw new InputError("Even wachten: er wordt nog een bestand opgeslagen.");
+    const attachments = proofDraft.list.slice();
+    if (editingId) {
+      const i = state.transactions.findIndex(x => x.id === editingId);
+      if (i < 0) throw new InputError("Deze transactie bestaat niet meer (intussen verwijderd op een ander toestel?).");
+      state.transactions[i] = { ...state.transactions[i], ...t, id: editingId, attachments };
+    } else state.transactions.push({ id: state.nextId++, ...t, attachments });
+    proofDraft.saved = true;
+    for (const a of window.BEWIJS.removedAttachments(proofDraft.before, attachments)) deleteProofFile(a);
     dlg.close(); commit();
     toast(editingId ? "Transactie bijgewerkt" : "Transactie toegevoegd");
   } catch (err) {
@@ -1695,20 +1801,199 @@ $("#btn-cancel").addEventListener("click", () => dlg.close());
 $("#btn-delete-tx").addEventListener("click", async () => {
   const id = editingId;
   dlg.close();
-  if (await confirmDialog("Deze transactie verwijderen?")) deleteTx(id);
+  if (await confirmDialog(deleteQuestion(id))) deleteTx(id);
 });
+function deleteQuestion(id) {
+  const n = (state.transactions.find(t => t.id === id)?.attachments || []).length;
+  return n ? `Deze transactie en ${n === 1 ? "het bewijsstuk" : `de ${n} bewijsstukken`} verwijderen?` : "Deze transactie verwijderen?";
+}
 function deleteTx(id) {
+  const gone = state.transactions.find(t => t.id === id);
   state.transactions = state.transactions.filter(t => t.id !== id);
+  for (const a of gone?.attachments || []) deleteProofFile(a);
   commit(); toast("Transactie verwijderd");
 }
 $("#tx-table").addEventListener("click", async e => {
   const del = e.target.closest("[data-del]");
-  if (del) { e.stopPropagation(); if (await confirmDialog("Deze transactie verwijderen?")) deleteTx(Number(del.dataset.del)); return; }
+  if (del) { e.stopPropagation(); if (await confirmDialog(deleteQuestion(Number(del.dataset.del)))) deleteTx(Number(del.dataset.del)); return; }
   const row = e.target.closest("tr[data-id]");
   if (row) openTxDialog(state.transactions.find(t => t.id === Number(row.dataset.id)));
 });
-["#f-year", "#f-owner"].forEach(s => $(s).addEventListener("change", renderTransactions));
+["#f-year", "#f-owner", "#f-proof"].forEach(s => $(s).addEventListener("change", renderTransactions));
 $("#f-asset").addEventListener("input", renderTransactions);
+
+// ================================================================ bewijsstukken
+// claude.ai: bestanden bij de pagina zelf (capability "assets", zelfde privacy als de pagina).
+// Elders (GitHub Pages, lokaal): IndexedDB in deze browser. De back-up bevat enkel naam en verwijzing.
+const proofs = { assets: null, ready: false, onClaude: !!window.claude };
+const proofDraft = { list: [], before: [], saved: false, session: 0, uploading: 0, urls: [] };
+
+async function initProofs() {
+  const use = window.claude && typeof window.claude.use === "function" ? window.claude.use.bind(window.claude) : null;
+  if (use) proofs.assets = await use("assets").catch(() => null);
+  proofs.ready = true;
+  if (dlg.open) renderProofs();
+}
+function proofStoreKind() {
+  if (proofs.assets) return "account";
+  if (!proofs.onClaude && typeof indexedDB !== "undefined") return "browser";
+  return null;
+}
+function heldKeys() {
+  const cfg = { ...defaultConfig(), fifoScope: state.settings.fifo_scope };
+  const hs = window.MWB.holdingsAt(state.transactions, "9999-12-31", cfg);
+  const keys = new Set(hs.map(h => `${h.owner}\u0000${h.asset}`));
+  if (state.settings.fifo_scope !== "EIGENAAR") { // gedeelde pot: elke eigenaar van dat actief telt als 'in bezit'
+    const assets = new Set(hs.map(h => h.asset));
+    for (const t of state.transactions) if (assets.has(t.asset)) keys.add(`${t.owner}\u0000${t.asset}`);
+  }
+  return keys;
+}
+
+const idb = {
+  db: null,
+  open() {
+    return this.db ??= new Promise((res, rej) => {
+      const r = indexedDB.open("meerwaarde-bewijzen", 1);
+      r.onupgradeneeded = () => r.result.createObjectStore("files");
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    });
+  },
+  async run(mode, fn) {
+    const db = await this.open();
+    return new Promise((res, rej) => {
+      const tx = db.transaction("files", mode), req = fn(tx.objectStore("files"));
+      tx.oncomplete = () => res(req.result); tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error);
+    });
+  },
+  put(id, blob) { return this.run("readwrite", s => s.put(blob, id)); },
+  get(id) { return this.run("readonly", s => s.get(id)); },
+  del(id) { return this.run("readwrite", s => s.delete(id)); },
+};
+
+async function saveProofFile(file) {
+  const type = window.BEWIJS.contentType(file.name, file.type);
+  const meta = { name: file.name, type, size: file.size, added: new Date().toISOString().slice(0, 10) };
+  if (proofStoreKind() === "account") {
+    let r;
+    try { r = await proofs.assets.upload(file, { type }); }
+    catch (e) {
+      if (e && e.code === "store_unavailable") { await new Promise(res => setTimeout(res, 1500)); r = await proofs.assets.upload(file, { type }); }
+      else throw e;
+    }
+    return { id: r.id, ...meta, size: r.sizeBytes ?? file.size, store: "account" };
+  }
+  const id = `b-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  await idb.put(id, new Blob([await file.arrayBuffer()], { type }));
+  return { id, ...meta, store: "browser" };
+}
+async function deleteProofFile(a) {
+  if (state.transactions.some(t => (t.attachments || []).some(x => x.id === a.id))) return; // nog in gebruik
+  try {
+    if (a.store === "account" && proofs.assets) await proofs.assets.delete(a.id);
+    else if (a.store === "browser" && !proofs.onClaude) await idb.del(a.id);
+  } catch { /* blijft als los bestand staan; geen gevolgen voor de berekening */ }
+}
+async function proofBlob(a) {
+  if (a.store === "account") {
+    const r = await fetch("/_blob/" + a.id);
+    if (!r.ok) throw new Error("Bestand niet gevonden.");
+    return r.blob();
+  }
+  const b = await idb.get(a.id);
+  if (!b) throw new Error("Bestand niet gevonden in deze browser.");
+  return b;
+}
+function proofReachable(a) {
+  if (a.store === "account") return proofs.onClaude;
+  return !proofs.onClaude && typeof indexedDB !== "undefined";
+}
+function proofErrorText(e, name) {
+  const m = {
+    too_large: "is te groot (max. 20 MB)", unsupported_type: "heeft een bestandstype dat niet bewaard kan worden",
+    quota_or_state: "past niet meer: de opslagruimte van de pagina is vol", rate_limited: "kon niet bewaard worden: even later opnieuw proberen",
+    not_granted: "kon niet bewaard worden: geen toestemming voor bestanden", QuotaExceededError: "past niet meer in de browseropslag",
+  }[e && (e.code || e.name)];
+  return `'${name}' ${m || "kon niet bewaard worden" + (e && e.code ? ` (${e.code})` : "")}.`;
+}
+
+function openProofs(tx) {
+  proofDraft.session++;
+  proofDraft.before = (tx?.attachments || []).slice();
+  proofDraft.list = proofDraft.before.slice();
+  proofDraft.saved = false; proofDraft.uploading = 0;
+  renderProofs();
+}
+function renderProofs() {
+  proofDraft.urls.forEach(u => URL.revokeObjectURL(u)); proofDraft.urls = [];
+  const kind = proofStoreKind();
+  $("#proof-add").hidden = !kind;
+  $("#proof-file").accept = window.BEWIJS.ACCEPT;
+  $("#proof-hint").textContent = kind === "account"
+    ? "Bv. het borderel of de afrekening van je bank (PDF of foto, max. 20 MB). Privé bewaard bij deze pagina in je Claude-account; niet in de back-up."
+    : kind === "browser"
+      ? "Bv. het borderel of de afrekening van je bank (PDF of foto, max. 20 MB). Bewaard in deze browser, niet in de back-up: bewaar het origineel ook zelf."
+      : !proofs.ready ? "Opslag voor bestanden wordt geladen…"
+        : "Bestanden toevoegen kan hier niet: de pagina heeft geen toestemming voor bestanden (menu van de pagina → Toestemmingen).";
+  const list = $("#proof-list");
+  list.innerHTML = proofDraft.list.map((a, i) => {
+    const ok = proofReachable(a);
+    const where = !ok ? `<span class="muted small">${a.store === "account" ? "staat op de claude.ai-pagina" : "staat in een andere browser"}</span>` : "";
+    return `<li class="${a.pending ? "busy" : ""}">
+      ${ok && !a.pending ? `<a href="#" data-open="${i}" title="Openen">📄 ${esc(a.name)}</a>` : `<span class="name">📄 ${esc(a.name)}</span>`}
+      <span class="muted small">${a.pending ? "bezig…" : esc(window.BEWIJS.sizeLabel(a.size))}</span>${where}
+      ${ok && !a.pending ? `<button type="button" class="btn small ghost" data-save="${i}">Bewaren</button>` : ""}
+      ${a.pending ? "" : `<button type="button" class="btn small danger" data-rm="${i}" aria-label="Bewijsstuk verwijderen">✕</button>`}</li>`;
+  }).join("") || `<li class="muted small">Nog geen bewijsstukken.</li>`;
+}
+$("#proof-file").addEventListener("change", async e => {
+  const files = [...e.target.files]; e.target.value = "";
+  const session = proofDraft.session;
+  for (const f of files) {
+    const err = window.BEWIJS.checkFile(f.name, f.type, f.size);
+    if (err) { toast(err, true); continue; }
+    const placeholder = { id: "", name: f.name, size: f.size, pending: true };
+    proofDraft.list.push(placeholder); proofDraft.uploading++; renderProofs();
+    try {
+      const a = await saveProofFile(f);
+      if (session !== proofDraft.session || proofDraft.saved) { deleteProofFile(a); continue; } // venster intussen gesloten
+      proofDraft.list[proofDraft.list.indexOf(placeholder)] = a;
+    } catch (err2) {
+      if (session === proofDraft.session) proofDraft.list.splice(proofDraft.list.indexOf(placeholder), 1);
+      toast(proofErrorText(err2, f.name), true);
+    } finally {
+      if (session === proofDraft.session) { proofDraft.uploading--; renderProofs(); }
+    }
+  }
+});
+$("#proof-list").addEventListener("click", async e => {
+  const rm = e.target.closest("[data-rm]"), sv = e.target.closest("[data-save]"), op = e.target.closest("[data-open]");
+  if (rm) {
+    const a = proofDraft.list[Number(rm.dataset.rm)];
+    if (!(await confirmDialog(`'${a.name}' verwijderen bij deze transactie? Het wordt definitief gewist als je de transactie opslaat.`))) return;
+    proofDraft.list.splice(proofDraft.list.indexOf(a), 1); renderProofs();
+  } else if (sv || op) {
+    e.preventDefault();
+    const a = proofDraft.list[Number((sv || op).dataset.save ?? (sv || op).dataset.open)];
+    try {
+      const blob = await proofBlob(a), image = String(a.type || blob.type).startsWith("image/");
+      if (op && (image || !proofs.onClaude)) {
+        const url = URL.createObjectURL(blob); proofDraft.urls.push(url);
+        if (image) {
+          $("#preview-title").textContent = a.name; $("#preview-img").src = url; $("#preview-dialog").showModal(); return;
+        }
+        if (window.open(url, "_blank")) return;
+      }
+      await offerDownload(a.name, blob, "Bewijsstuk");
+    } catch (err) { toast(err.message || "Openen mislukt", true); }
+  }
+});
+dlg.addEventListener("close", () => {
+  proofDraft.session++;
+  if (!proofDraft.saved) // nieuw opgeladen maar niet opgeslagen: opruimen
+    for (const a of window.BEWIJS.removedAttachments(proofDraft.list.filter(x => !x.pending), proofDraft.before)) deleteProofFile(a);
+  proofDraft.urls.forEach(u => setTimeout(() => URL.revokeObjectURL(u), 60000)); proofDraft.urls = [];
+});
 
 // ================================================================ activa
 function renderAssets() {
@@ -1840,7 +2125,7 @@ $("#withheld-table").addEventListener("click", e => {
 });
 
 // back-up
-async function offerDownload(filename, text, fallbackLabel) {
+async function offerDownload(filename, text, fallbackLabel) { // text: tekst of Blob
   const use = window.claude && window.claude.use ? window.claude.use.bind(window.claude) : null;
   const dl = use ? await use("downloads").catch(() => null) : null;
   if (dl) {
@@ -1849,13 +2134,14 @@ async function offerDownload(filename, text, fallbackLabel) {
   }
   if (!use) { // buiten claude.ai: gewoon als bestand downloaden
     try {
-      const url = URL.createObjectURL(new Blob([text], { type: filename.endsWith(".csv") ? "text/csv" : "application/json" }));
+      const url = URL.createObjectURL(text instanceof Blob ? text : new Blob([text], { type: filename.endsWith(".csv") ? "text/csv" : "application/json" }));
       const a = Object.assign(document.createElement("a"), { href: url, download: filename });
       document.body.append(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10000);
       return;
     } catch {}
   }
+  if (text instanceof Blob) return toast(`${fallbackLabel} kon niet bewaard worden in deze weergave.`, true);
   try { await navigator.clipboard.writeText(text); toast(`${fallbackLabel} gekopieerd naar het klembord`); }
   catch { showTextDialog(fallbackLabel, text); }
 }
@@ -1882,7 +2168,11 @@ async function importBackup(text) {
   $("#import-text").value = ""; commit(); toast("Back-up hersteld");
 }
 $("#btn-reset").addEventListener("click", async () => {
-  if (await confirmDialog("Alle gegevens wissen? Maak eerst een back-up als je ze wil bewaren.")) { state = emptyState(); commit(); toast("Alle gegevens gewist"); }
+  const files = state.transactions.flatMap(t => t.attachments || []);
+  if (await confirmDialog("Alle gegevens wissen? Maak eerst een back-up als je ze wil bewaren." + (files.length ? ` Ook de ${files.length} bewijsstukken worden verwijderd (die zitten niet in de back-up).` : ""))) {
+    state = emptyState(); commit(); toast("Alle gegevens gewist");
+    for (const a of files) deleteProofFile(a);
+  }
 });
 
 // ================================================================ Bolero-import
@@ -2135,6 +2425,7 @@ function showTextDialog(title, text) {
   $("#text-title").textContent = title; $("#text-body").value = text; $("#text-dialog").showModal(); $("#text-body").select();
 }
 $("#text-close").addEventListener("click", () => $("#text-dialog").close());
+$("#preview-close").addEventListener("click", () => $("#preview-dialog").close());
 let toastTimer;
 function toast(msg, isError = false) {
   const t = $("#toast"); t.textContent = msg; t.className = `toast show${isError ? " error" : ""}`;
@@ -2193,6 +2484,7 @@ function setupInstall() {
 setupInstall();
 
 initStorage();
+initProofs();
 </script>
 </body>
 </html>
