@@ -1290,7 +1290,7 @@ function lsSet(v) { try { localStorage.setItem(LS_KEY, v); return true; } catch 
 
 async function initStorage() {
   const local = lsGet();
-  if (local) { try { const s = JSON.parse(local); if (validState(s)) state = s; } catch {} }
+  if (local) { try { const s = JSON.parse(local); if (validState(s)) { state = s; if (migrateToNames()) lsSet(JSON.stringify(state)); } } catch {} }
   let lsOk = false;
   try { localStorage.setItem(LS_KEY + "-test", "1"); localStorage.removeItem(LS_KEY + "-test"); lsOk = true; } catch {}
   storage.mode = lsOk ? "browser" : "geheugen";
@@ -1321,7 +1321,7 @@ async function initStorage() {
           if (json && json !== storage.lastJson && !busy()) {
             try {
               const s = JSON.parse(json);
-              if (validState(s)) { state = s; storage.lastJson = json; lsSet(json); render(); }
+              if (validState(s)) { state = s; storage.lastJson = json; lsSet(json); if (migrateToNames()) persist(); render(); }
             } catch {}
           }
         }
@@ -1878,6 +1878,7 @@ async function importBackup(text) {
   if (!validState(s)) return toast("Dit bestand heeft niet de vorm van een back-up van deze tool.", true);
   if (!(await confirmDialog(`Back-up met ${s.transactions.length} transacties herstellen? Je huidige gegevens worden vervangen.`))) return;
   state = s; state.nextId = Math.max(state.nextId || 1, ...state.transactions.map(t => t.id + 1));
+  migrateToNames();
   $("#import-text").value = ""; commit(); toast("Back-up hersteld");
 }
 $("#btn-reset").addEventListener("click", async () => {
@@ -2068,6 +2069,29 @@ function moveAssetKeys(plan) {
   }
   return n;
 }
+
+/**
+ * Gegevens van vroegere versies: effecten die onder een ISIN (of, bij Saxo, onder een ticker) staan,
+ * verhuizen naar hun naam, zodat Actief overal de naam is. Enkel als de naam gekend is.
+ */
+function nameMigrationPlan() {
+  const plan = new Map();
+  for (const [key, a] of Object.entries(state.assets)) {
+    const txs = state.transactions.filter(t => t.asset === key);
+    const saxoOnly = txs.length > 0 && txs.every(t => String(t.import_id || "").startsWith("s:"));
+    if (!isIsinCode(key) && !saxoOnly) continue; // Bolero en zelf ingevoerde namen blijven zoals ze zijn
+    let name = String(a.name || "").trim();
+    if (!name && saxoOnly) name = String(txs.find(t => t.note)?.note || "").split(";")[0].trim(); // Saxo zet de naam in de notitie
+    if (!name) continue;
+    let to = name.replace(/\s+/g, " ").toUpperCase();
+    const isin = a.isin || (isIsinCode(key) ? key : "");
+    const other = state.assets[to];
+    if (other && other.isin && isin && other.isin !== isin) to = `${to} (${isin})`;
+    if (to !== key) plan.set(key, to);
+  }
+  return plan;
+}
+function migrateToNames() { return moveAssetKeys(nameMigrationPlan()); }
 
 // voorbeeld
 function loadExample() {
