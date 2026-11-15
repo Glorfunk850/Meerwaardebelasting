@@ -74,15 +74,30 @@
     const seen = new Map();
     let firstDate = null, lastDate = null;
     const lines = T.rows.filter(({ r }) => r.some(v => v != null && v !== "")).reverse(); // export is aflopend
-    // regels zonder ISIN: ISIN van een andere regel met hetzelfde instrument (naam of symbool) gebruiken
-    const isinByName = new Map(), isinBySymbol = new Map();
-    const instrName = r => { const raw = String(r[c.instr] ?? "").trim(), tag = delistedTag(raw); return norm(tag ? tag.name : raw); };
+    // het actief heet zoals het instrument (naam, zoals bij Bolero); de ISIN wordt apart bewaard.
+    // Regels zonder ISIN krijgen die van een andere regel met hetzelfde instrument (naam of symbool).
+    // Eén naam per ISIN: de recentste naam in de export (bij een naamswijziging blijft het één actief).
+    const isinByName = new Map(), isinBySymbol = new Map(), nameByIsin = new Map();
+    const instrName = r => { const raw = String(r[c.instr] ?? "").trim(), tag = delistedTag(raw); return (tag ? tag.name : raw).replace(/\s+/g, " "); };
     for (const { r } of lines) {
       const isin = String(r[c.isin] ?? "").trim().toUpperCase(), sym = norm(r[c.symbol]);
       if (!isin) continue;
-      if (instrName(r)) isinByName.set(instrName(r), isin);
+      if (instrName(r)) {
+        const k = norm(instrName(r));
+        isinByName.set(k, isinByName.has(k) && isinByName.get(k) !== isin ? null : isin); // null: naam bij meerdere ISIN's
+        nameByIsin.set(isin, instrName(r));
+      }
       if (sym) isinBySymbol.set(sym, isin);
     }
+    const keyByIsin = new Map(), isinByKey = new Map();
+    const assetKey = (isin, name) => {
+      if (!isin) return name.toUpperCase();
+      if (keyByIsin.has(isin)) return keyByIsin.get(isin);
+      let key = (nameByIsin.get(isin) || name).toUpperCase();
+      if (isinByKey.has(key) && isinByKey.get(key) !== isin) key = `${key} (${isin})`; // zelfde naam, ander effect
+      keyByIsin.set(isin, key); isinByKey.set(key, isin);
+      return key;
+    };
     for (const { r, n } of lines) {
       const src = `${fileName}:${n}`;
       const type = norm(r[c.type]);
@@ -92,8 +107,7 @@
       const oc = norm(r[c.openClose]);
       const ownIsin = String(r[c.isin] ?? "").trim().toUpperCase();
       const symbol = String(r[c.symbol] ?? "").trim();
-      const isin = ownIsin || isinByName.get(instrName(r)) || (symbol && isinBySymbol.get(norm(symbol))) || "";
-      const ticker = tickerOf(symbol);
+      const isin = ownIsin || isinByName.get(norm(instrName(r))) || (symbol && isinBySymbol.get(norm(symbol))) || "";
       const rawName = String(r[c.instr] ?? "").trim();
       const tag = delistedTag(rawName);
       const name = tag ? tag.name : rawName;
@@ -104,7 +118,8 @@
       }
       const qtyRaw = num(r[c.qty]), price = num(r[c.price]);
       if (!qtyRaw || qtyRaw.isZero() || price == null) { warnings.push(`${src}: aantal of prijs ontbreekt (${name}), overgeslagen.`); continue; }
-      if (!isin) warnings.push(`${src}: geen ISIN voor ${name}; ${ticker ? `de ticker ${ticker}` : "de naam"} wordt gebruikt als code.`);
+      if (!isin) warnings.push(`${src}: geen ISIN voor ${name} in de export` +
+        (isinByName.get(norm(instrName(r))) === null ? " (de naam hoort bij meerdere ISIN's: controleer bij welk effect deze transactie hoort)." : "."));
       const isSell = qtyRaw.lt(0) || oc === "to close" && /verkoop/i.test(String(r[c.action]));
       const qty = abs(qtyRaw);
       const ccy = String(r[c.ccy] || "EUR").trim().toUpperCase() || "EUR";
@@ -118,7 +133,7 @@
       const txid = String(r[c.txid] ?? "").trim();
       const taxEur = Dmin(taxesById.get(txid) || ZERO, costsEur);
       const toCcy = eurAmt => (ccy === "EUR" ? eurAmt : eurAmt.mul(fx)).round(2);
-      const asset = isin || ticker || name.toUpperCase();
+      const asset = assetKey(isin, name);
       // import-id zoals vroeger (met ISIN of naam), zodat een herimport dezelfde transacties herkent
       const base = `saxo|${txid || ""}|${date}|${ownIsin || name.toUpperCase()}|${qtyRaw}|${price}`;
       const k = (seen.get(base) || 0) + 1; seen.set(base, k);
@@ -132,7 +147,7 @@
       const pl = num(r[c.pl]);
       if (isSell && pl != null) t.saxo_result = pl.toString();
       out.push(t);
-      assets[asset] ??= { currency: ccy, name, symbol, kind: String(r[c.kind] || "").trim() };
+      assets[asset] ??= { currency: ccy, name, isin, symbol, kind: String(r[c.kind] || "").trim() };
       if (tag) delistInfo.set(asset, { date: tag.date, name });
       firstDate = !firstDate || date < firstDate ? date : firstDate;
       lastDate = !lastDate || date > lastDate ? date : lastDate;
@@ -158,22 +173,17 @@
     return { source: "saxo", transactions: out, skipped, warnings, refHints: {}, assets, positions, delistings, fileName, rows: lines.length, period: [firstDate, lastDate] };
   }
   const Dmin = (a, b) => (a.lte(b) ? a : b);
-  /** Saxo-symbool "EMIM:xams" -> ticker "EMIM" */
-  const tickerOf = sym => String(sym || "").split(":")[0].trim().toUpperCase();
-  const isIsin = k => /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(String(k || ""));
 
   /**
-   * Codes van eerder geïmporteerde transacties bijwerken: dezelfde transactie (zelfde import-id) die
-   * vroeger onder de naam stond, staat nu onder de ISIN of ticker. Een ISIN wordt nooit vervangen.
-   * -> Map oude code -> nieuwe code
+   * Eerder geïmporteerde transacties (zelfde import-id) die onder een andere naam staan, bv. de ISIN of
+   * een ticker uit een vorige versie, verhuizen naar de naam van deze import. -> Map oude -> nieuwe naam
    */
   function keyMigrations(existing, incoming) {
     const byId = new Map(existing.filter(t => t.import_id).map(t => [t.import_id, t]));
     const plan = new Map();
     for (const t of incoming) {
       const old = byId.get(t.import_id);
-      if (!old || old.asset === t.asset || isIsin(old.asset)) continue;
-      if (!plan.has(old.asset) || isIsin(t.asset)) plan.set(old.asset, t.asset);
+      if (old && old.asset !== t.asset && !plan.has(old.asset)) plan.set(old.asset, t.asset);
     }
     return plan;
   }
@@ -183,6 +193,6 @@
     return parseSaxoSheets(sheets, opts);
   }
 
-  const api = { parseSaxoSheets, parseSaxoFile, delistedTag, tickerOf, keyMigrations };
+  const api = { parseSaxoSheets, parseSaxoFile, delistedTag, keyMigrations };
   if (node) module.exports = api; else root.SAXO = api;
 })(typeof window !== "undefined" ? window : globalThis);

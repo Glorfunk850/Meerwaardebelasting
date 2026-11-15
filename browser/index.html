@@ -177,7 +177,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     <div class="filters">
       <label>Jaar <select id="f-year"><option value="">Alle</option></select></label>
       <label>Eigenaar <select id="f-owner"><option value="">Alle</option></select></label>
-      <label>Actief <input id="f-asset" placeholder="ISIN/ticker" size="12"></label>
+      <label>Actief <input id="f-asset" placeholder="naam" size="12"></label>
     </div>
     <div class="table-wrap"><table id="tx-table"><thead><tr>
       <th>Datum</th><th>Type</th><th>Actief</th><th class="num">Aantal</th><th class="num">Prijs / bedrag</th>
@@ -195,7 +195,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     <p class="muted">Voor elk actief dat je vóór 1 januari 2026 verwierf, is de waarde per stuk op 31/12/2025 nodig
       (slotkoers, omgerekend naar EUR). Activa worden automatisch toegevoegd bij een transactie.</p>
     <div id="asset-missing" class="alert warn" hidden></div>
-    <div class="table-wrap"><table id="asset-table"><thead><tr><th>ISIN/ticker</th><th>Naam</th><th>Type</th><th>Munt</th>
+    <div class="table-wrap"><table id="asset-table"><thead><tr><th>Naam</th><th>ISIN</th><th>Type</th><th>Munt</th>
       <th class="num">Waarde 31/12/2025 (EUR/stuk)</th><th>Bron</th><th></th></tr></thead><tbody></tbody></table></div>
     <p id="asset-empty" class="empty" hidden>Nog geen activa.</p>
   </section>
@@ -261,7 +261,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     <div class="grid">
       <label class="field">Type <select name="type" required></select></label>
       <label class="field">Datum <input name="trade_date" type="date" required></label>
-      <label class="field">Actief (ISIN/ticker) <input name="asset" required autocomplete="off" autocapitalize="characters" list="asset-list"></label>
+      <label class="field">Actief (naam) <input name="asset" required autocomplete="off" autocapitalize="characters" list="asset-list"></label>
       <label class="field">Eigenaar <input name="owner" list="owner-list"></label>
       <label class="field">Broker <input name="broker" list="broker-list" placeholder="bv. Bolero, Saxo"></label>
       <label class="field g-delist">Soort delisting <select name="delist_mode"></select></label>
@@ -1110,15 +1110,30 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     const seen = new Map();
     let firstDate = null, lastDate = null;
     const lines = T.rows.filter(({ r }) => r.some(v => v != null && v !== "")).reverse(); // export is aflopend
-    // regels zonder ISIN: ISIN van een andere regel met hetzelfde instrument (naam of symbool) gebruiken
-    const isinByName = new Map(), isinBySymbol = new Map();
-    const instrName = r => { const raw = String(r[c.instr] ?? "").trim(), tag = delistedTag(raw); return norm(tag ? tag.name : raw); };
+    // het actief heet zoals het instrument (naam, zoals bij Bolero); de ISIN wordt apart bewaard.
+    // Regels zonder ISIN krijgen die van een andere regel met hetzelfde instrument (naam of symbool).
+    // Eén naam per ISIN: de recentste naam in de export (bij een naamswijziging blijft het één actief).
+    const isinByName = new Map(), isinBySymbol = new Map(), nameByIsin = new Map();
+    const instrName = r => { const raw = String(r[c.instr] ?? "").trim(), tag = delistedTag(raw); return (tag ? tag.name : raw).replace(/\s+/g, " "); };
     for (const { r } of lines) {
       const isin = String(r[c.isin] ?? "").trim().toUpperCase(), sym = norm(r[c.symbol]);
       if (!isin) continue;
-      if (instrName(r)) isinByName.set(instrName(r), isin);
+      if (instrName(r)) {
+        const k = norm(instrName(r));
+        isinByName.set(k, isinByName.has(k) && isinByName.get(k) !== isin ? null : isin); // null: naam bij meerdere ISIN's
+        nameByIsin.set(isin, instrName(r));
+      }
       if (sym) isinBySymbol.set(sym, isin);
     }
+    const keyByIsin = new Map(), isinByKey = new Map();
+    const assetKey = (isin, name) => {
+      if (!isin) return name.toUpperCase();
+      if (keyByIsin.has(isin)) return keyByIsin.get(isin);
+      let key = (nameByIsin.get(isin) || name).toUpperCase();
+      if (isinByKey.has(key) && isinByKey.get(key) !== isin) key = `${key} (${isin})`; // zelfde naam, ander effect
+      keyByIsin.set(isin, key); isinByKey.set(key, isin);
+      return key;
+    };
     for (const { r, n } of lines) {
       const src = `${fileName}:${n}`;
       const type = norm(r[c.type]);
@@ -1128,8 +1143,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
       const oc = norm(r[c.openClose]);
       const ownIsin = String(r[c.isin] ?? "").trim().toUpperCase();
       const symbol = String(r[c.symbol] ?? "").trim();
-      const isin = ownIsin || isinByName.get(instrName(r)) || (symbol && isinBySymbol.get(norm(symbol))) || "";
-      const ticker = tickerOf(symbol);
+      const isin = ownIsin || isinByName.get(norm(instrName(r))) || (symbol && isinBySymbol.get(norm(symbol))) || "";
       const rawName = String(r[c.instr] ?? "").trim();
       const tag = delistedTag(rawName);
       const name = tag ? tag.name : rawName;
@@ -1140,7 +1154,8 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
       }
       const qtyRaw = num(r[c.qty]), price = num(r[c.price]);
       if (!qtyRaw || qtyRaw.isZero() || price == null) { warnings.push(`${src}: aantal of prijs ontbreekt (${name}), overgeslagen.`); continue; }
-      if (!isin) warnings.push(`${src}: geen ISIN voor ${name}; ${ticker ? `de ticker ${ticker}` : "de naam"} wordt gebruikt als code.`);
+      if (!isin) warnings.push(`${src}: geen ISIN voor ${name} in de export` +
+        (isinByName.get(norm(instrName(r))) === null ? " (de naam hoort bij meerdere ISIN's: controleer bij welk effect deze transactie hoort)." : "."));
       const isSell = qtyRaw.lt(0) || oc === "to close" && /verkoop/i.test(String(r[c.action]));
       const qty = abs(qtyRaw);
       const ccy = String(r[c.ccy] || "EUR").trim().toUpperCase() || "EUR";
@@ -1154,7 +1169,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
       const txid = String(r[c.txid] ?? "").trim();
       const taxEur = Dmin(taxesById.get(txid) || ZERO, costsEur);
       const toCcy = eurAmt => (ccy === "EUR" ? eurAmt : eurAmt.mul(fx)).round(2);
-      const asset = isin || ticker || name.toUpperCase();
+      const asset = assetKey(isin, name);
       // import-id zoals vroeger (met ISIN of naam), zodat een herimport dezelfde transacties herkent
       const base = `saxo|${txid || ""}|${date}|${ownIsin || name.toUpperCase()}|${qtyRaw}|${price}`;
       const k = (seen.get(base) || 0) + 1; seen.set(base, k);
@@ -1168,7 +1183,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
       const pl = num(r[c.pl]);
       if (isSell && pl != null) t.saxo_result = pl.toString();
       out.push(t);
-      assets[asset] ??= { currency: ccy, name, symbol, kind: String(r[c.kind] || "").trim() };
+      assets[asset] ??= { currency: ccy, name, isin, symbol, kind: String(r[c.kind] || "").trim() };
       if (tag) delistInfo.set(asset, { date: tag.date, name });
       firstDate = !firstDate || date < firstDate ? date : firstDate;
       lastDate = !lastDate || date > lastDate ? date : lastDate;
@@ -1194,22 +1209,17 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     return { source: "saxo", transactions: out, skipped, warnings, refHints: {}, assets, positions, delistings, fileName, rows: lines.length, period: [firstDate, lastDate] };
   }
   const Dmin = (a, b) => (a.lte(b) ? a : b);
-  /** Saxo-symbool "EMIM:xams" -> ticker "EMIM" */
-  const tickerOf = sym => String(sym || "").split(":")[0].trim().toUpperCase();
-  const isIsin = k => /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(String(k || ""));
 
   /**
-   * Codes van eerder geïmporteerde transacties bijwerken: dezelfde transactie (zelfde import-id) die
-   * vroeger onder de naam stond, staat nu onder de ISIN of ticker. Een ISIN wordt nooit vervangen.
-   * -> Map oude code -> nieuwe code
+   * Eerder geïmporteerde transacties (zelfde import-id) die onder een andere naam staan, bv. de ISIN of
+   * een ticker uit een vorige versie, verhuizen naar de naam van deze import. -> Map oude -> nieuwe naam
    */
   function keyMigrations(existing, incoming) {
     const byId = new Map(existing.filter(t => t.import_id).map(t => [t.import_id, t]));
     const plan = new Map();
     for (const t of incoming) {
       const old = byId.get(t.import_id);
-      if (!old || old.asset === t.asset || isIsin(old.asset)) continue;
-      if (!plan.has(old.asset) || isIsin(t.asset)) plan.set(old.asset, t.asset);
+      if (old && old.asset !== t.asset && !plan.has(old.asset)) plan.set(old.asset, t.asset);
     }
     return plan;
   }
@@ -1219,7 +1229,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     return parseSaxoSheets(sheets, opts);
   }
 
-  const api = { parseSaxoSheets, parseSaxoFile, delistedTag, tickerOf, keyMigrations };
+  const api = { parseSaxoSheets, parseSaxoFile, delistedTag, keyMigrations };
   if (node) module.exports = api; else root.SAXO = api;
 })(typeof window !== "undefined" ? window : globalThis);
 </script>
@@ -1392,7 +1402,7 @@ function validateTx(p) {
   if (!TYPE_LABELS[p.type]) throw new InputError(`Onbekend transactietype: ${p.type}`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(p.trade_date || "") || isNaN(Date.parse(p.trade_date))) throw new InputError("Datum moet het formaat JJJJ-MM-DD hebben.");
   const asset = String(p.asset || "").trim().toUpperCase();
-  if (!asset) throw new InputError("Actief (ISIN of ticker) is verplicht.");
+  if (!asset) throw new InputError("Actief (naam) is verplicht.");
   const out = {
     owner: String(p.owner || DEFAULT_OWNER).trim(), broker: String(p.broker || "").trim(), trade_date: p.trade_date,
     type: p.type, asset, currency: String(p.currency || "EUR").trim().toUpperCase(),
@@ -1724,10 +1734,10 @@ function renderAssets() {
   $("#asset-table tbody").innerHTML = list.map(([isin, a]) => {
     const need = needsRef(isin), u = used(isin), gone = closed([isin, a]);
     return `<tr data-isin="${esc(isin)}"${gone ? ` class="muted"` : ""}>
-      <td><strong>${esc(isin)}</strong>${need && (a.ref_value_eur == null || a.ref_value_eur === "") ? ` <span class="badge need">waarde nodig</span>` : ""}
+      <td><strong>${esc(isin)}</strong>${a.name && isIsinCode(isin) ? `<br><span class="small muted">${esc(a.name)}</span>` : ""}${need && (a.ref_value_eur == null || a.ref_value_eur === "") ? ` <span class="badge need">waarde nodig</span>` : ""}
         ${delistedOn(isin) ? ` <span class="badge" title="Delisting geregistreerd">geschrapt ${esc(delistedOn(isin))}</span>` : ""}
         ${gone ? ` <span class="badge" title="Niet meer in portefeuille">afgesloten</span>` : ""}</td>
-      <td><input name="name" value="${esc(a.name)}" aria-label="Naam"></td>
+      <td><input name="isin" value="${esc(a.isin || (isIsinCode(isin) ? isin : ""))}" maxlength="12" placeholder="niet in export" autocapitalize="characters" aria-label="ISIN"></td>
       <td><select name="asset_type" aria-label="Type">${ASSET_TYPES.map(t => `<option ${t === a.asset_type ? "selected" : ""}>${t}</option>`).join("")}</select></td>
       <td><input name="currency" value="${esc(a.currency)}" maxlength="5" class="w-sm" aria-label="Munt"></td>
       <td><input name="ref_value_eur" inputmode="decimal" class="num" value="${esc(a.ref_value_eur ?? "")}" placeholder="${need ? "verplicht" : "n.v.t."}" aria-label="Waarde 31/12/2025"></td>
@@ -1758,7 +1768,9 @@ $("#asset-table").addEventListener("click", async e => {
   const v = {}; $$("input, select", row).forEach(el => { v[el.name] = el.value.trim(); });
   try {
     const ref = dec(v.ref_value_eur, "waarde 31/12/2025", { nonNegative: true });
-    state.assets[isin] = { ...state.assets[isin], name: v.name, asset_type: v.asset_type, currency: (v.currency || "EUR").toUpperCase(), ref_value_eur: ref, ref_source: v.ref_source };
+    const code = v.isin.replace(/\s/g, "").toUpperCase();
+    if (code && !isIsinCode(code)) throw new InputError("Een ISIN heeft 12 tekens: 2 letters, 9 letters of cijfers en een cijfer (bv. BE0003565737).");
+    state.assets[isin] = { ...state.assets[isin], isin: code, asset_type: v.asset_type, currency: (v.currency || "EUR").toUpperCase(), ref_value_eur: ref, ref_source: v.ref_source };
     commit(); toast(`${isin} bewaard`);
   } catch (err) { toast(err.message, true); }
 });
@@ -1991,6 +2003,7 @@ $("#imp-confirm").addEventListener("click", () => {
     for (const [isin, a] of Object.entries(r.assets)) {
       state.assets[isin] ??= { name: "", asset_type: kindMap[(a.kind || "").toLowerCase()] || "aandeel", currency: a.currency, ref_value_eur: null, ref_source: "" };
       if (!state.assets[isin].name && a.name) state.assets[isin].name = a.name;
+      if (!state.assets[isin].isin && a.isin) state.assets[isin].isin = a.isin;
     }
     for (const { d, add, mode, price } of delists) {
       const id = `delist:${owner}:${d.asset}:${d.date}`;
@@ -2028,11 +2041,12 @@ $("#imp-confirm").addEventListener("click", () => {
     const missing = [...need.keys()].filter(a => needsRef(a) && !(state.assets[a]?.ref_value_eur));
     $("#import-dialog").close(); pendingImport = null;
     commit();
-    toast(`${added} transacties geïmporteerd` + (moved ? `; ${moved} ${moved === 1 ? "effect staat" : "effecten staan"} nu onder ISIN/ticker` : "") + (missing.length ? `. Vul nog de waarde op 31/12/2025 in bij Activa voor: ${missing.map(a => state.assets[a]?.name || a).join(", ")}` : ""), missing.length > 0);
+    toast(`${added} transacties geïmporteerd` + (moved ? `; ${moved} ${moved === 1 ? "effect staat" : "effecten staan"} nu onder de naam` : "") + (missing.length ? `. Vul nog de waarde op 31/12/2025 in bij Activa voor: ${missing.map(a => state.assets[a]?.name || a).join(", ")}` : ""), missing.length > 0);
   } catch (err) { toast(err.message, true); }
 });
 
-/** Oude code -> nieuwe code in transacties en activa (Saxo-effecten die vroeger onder de naam stonden). */
+const isIsinCode = k => /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(String(k || ""));
+/** Oude naam -> nieuwe naam in transacties en activa (bv. Saxo-effecten die vroeger onder de ISIN stonden). */
 function moveAssetKeys(plan) {
   let n = 0;
   for (const [from, to] of plan || []) {
@@ -2046,6 +2060,7 @@ function moveAssetKeys(plan) {
     if (src) {
       const merged = { ...src };
       if (dst) for (const [k, v] of Object.entries(dst)) if (v != null && v !== "") merged[k] = v;
+      if (!merged.isin && isIsinCode(from)) merged.isin = from;
       state.assets[to] = merged;
       delete state.assets[from];
     }
@@ -2057,24 +2072,24 @@ function moveAssetKeys(plan) {
 // voorbeeld
 function loadExample() {
   const ex = [
-    { type: "BUY", trade_date: "2024-05-01", asset: "BE0003565737", quantity: "100", price: "50", historic_proven: true, broker: "Bolero" },
-    { type: "BUY", trade_date: "2025-05-01", asset: "BE0003565737", quantity: "50", price: "120", historic_proven: true, broker: "Bolero" },
-    { type: "BUY", trade_date: "2026-03-01", asset: "BE0003565737", quantity: "50", price: "90", broker: "Bolero" },
-    { type: "SELL", trade_date: "2026-09-01", asset: "BE0003565737", quantity: "120", price: "110", fees: "7.50", taxes: "4.62", broker: "Bolero" },
-    { type: "BUY", trade_date: "2026-02-01", asset: "US0378331005", quantity: "20", price: "300", currency: "USD", fx_per_eur: "1.20", broker: "Saxo" },
-    { type: "SELL", trade_date: "2026-11-01", asset: "US0378331005", quantity: "20", price: "250", currency: "USD", fx_per_eur: "1.10", broker: "Saxo" },
-    { type: "DIVIDEND", trade_date: "2026-05-01", asset: "BE0003565737", amount: "150", broker: "Bolero" },
+    { type: "BUY", trade_date: "2024-05-01", asset: "VOORBEELD NV", quantity: "100", price: "50", historic_proven: true, broker: "Bolero" },
+    { type: "BUY", trade_date: "2025-05-01", asset: "VOORBEELD NV", quantity: "50", price: "120", historic_proven: true, broker: "Bolero" },
+    { type: "BUY", trade_date: "2026-03-01", asset: "VOORBEELD NV", quantity: "50", price: "90", broker: "Bolero" },
+    { type: "SELL", trade_date: "2026-09-01", asset: "VOORBEELD NV", quantity: "120", price: "110", fees: "7.50", taxes: "4.62", broker: "Bolero" },
+    { type: "BUY", trade_date: "2026-02-01", asset: "VOORBEELD INC.", quantity: "20", price: "300", currency: "USD", fx_per_eur: "1.20", broker: "Saxo" },
+    { type: "SELL", trade_date: "2026-11-01", asset: "VOORBEELD INC.", quantity: "20", price: "250", currency: "USD", fx_per_eur: "1.10", broker: "Saxo" },
+    { type: "DIVIDEND", trade_date: "2026-05-01", asset: "VOORBEELD NV", amount: "150", broker: "Bolero" },
   ];
   for (const raw of ex) {
     const t = validateTx(raw);
     state.assets[t.asset] ??= { name: "", asset_type: "aandeel", currency: t.currency, ref_value_eur: null, ref_source: "" };
     state.transactions.push({ id: state.nextId++, ...t });
   }
-  state.assets["BE0003565737"].name = "Voorbeeld NV";
-  state.assets["BE0003565737"].ref_value_eur = "80";
-  state.assets["BE0003565737"].ref_source = "voorbeeld";
-  state.assets["US0378331005"].name = "Voorbeeld Inc.";
-  state.assets["US0378331005"].currency = "USD";
+  state.assets["VOORBEELD NV"].isin = "BE0003565737";
+  state.assets["VOORBEELD NV"].ref_value_eur = "80";
+  state.assets["VOORBEELD NV"].ref_source = "voorbeeld";
+  state.assets["VOORBEELD INC."].isin = "US0378331005";
+  state.assets["VOORBEELD INC."].currency = "USD";
   state.withheld = state.withheld.filter(w => !(w.owner === DEFAULT_OWNER && w.year === 2026));
   state.withheld.push({ owner: DEFAULT_OWNER, year: 2026, amount: "360" });
   commit(); toast("Voorbeeld geladen. Je kunt het wissen via Instellingen.");

@@ -167,7 +167,7 @@ function validateTx(p) {
   if (!TYPE_LABELS[p.type]) throw new InputError(`Onbekend transactietype: ${p.type}`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(p.trade_date || "") || isNaN(Date.parse(p.trade_date))) throw new InputError("Datum moet het formaat JJJJ-MM-DD hebben.");
   const asset = String(p.asset || "").trim().toUpperCase();
-  if (!asset) throw new InputError("Actief (ISIN of ticker) is verplicht.");
+  if (!asset) throw new InputError("Actief (naam) is verplicht.");
   const out = {
     owner: String(p.owner || DEFAULT_OWNER).trim(), broker: String(p.broker || "").trim(), trade_date: p.trade_date,
     type: p.type, asset, currency: String(p.currency || "EUR").trim().toUpperCase(),
@@ -499,10 +499,10 @@ function renderAssets() {
   $("#asset-table tbody").innerHTML = list.map(([isin, a]) => {
     const need = needsRef(isin), u = used(isin), gone = closed([isin, a]);
     return `<tr data-isin="${esc(isin)}"${gone ? ` class="muted"` : ""}>
-      <td><strong>${esc(isin)}</strong>${need && (a.ref_value_eur == null || a.ref_value_eur === "") ? ` <span class="badge need">waarde nodig</span>` : ""}
+      <td><strong>${esc(isin)}</strong>${a.name && isIsinCode(isin) ? `<br><span class="small muted">${esc(a.name)}</span>` : ""}${need && (a.ref_value_eur == null || a.ref_value_eur === "") ? ` <span class="badge need">waarde nodig</span>` : ""}
         ${delistedOn(isin) ? ` <span class="badge" title="Delisting geregistreerd">geschrapt ${esc(delistedOn(isin))}</span>` : ""}
         ${gone ? ` <span class="badge" title="Niet meer in portefeuille">afgesloten</span>` : ""}</td>
-      <td><input name="name" value="${esc(a.name)}" aria-label="Naam"></td>
+      <td><input name="isin" value="${esc(a.isin || (isIsinCode(isin) ? isin : ""))}" maxlength="12" placeholder="niet in export" autocapitalize="characters" aria-label="ISIN"></td>
       <td><select name="asset_type" aria-label="Type">${ASSET_TYPES.map(t => `<option ${t === a.asset_type ? "selected" : ""}>${t}</option>`).join("")}</select></td>
       <td><input name="currency" value="${esc(a.currency)}" maxlength="5" class="w-sm" aria-label="Munt"></td>
       <td><input name="ref_value_eur" inputmode="decimal" class="num" value="${esc(a.ref_value_eur ?? "")}" placeholder="${need ? "verplicht" : "n.v.t."}" aria-label="Waarde 31/12/2025"></td>
@@ -533,7 +533,9 @@ $("#asset-table").addEventListener("click", async e => {
   const v = {}; $$("input, select", row).forEach(el => { v[el.name] = el.value.trim(); });
   try {
     const ref = dec(v.ref_value_eur, "waarde 31/12/2025", { nonNegative: true });
-    state.assets[isin] = { ...state.assets[isin], name: v.name, asset_type: v.asset_type, currency: (v.currency || "EUR").toUpperCase(), ref_value_eur: ref, ref_source: v.ref_source };
+    const code = v.isin.replace(/\s/g, "").toUpperCase();
+    if (code && !isIsinCode(code)) throw new InputError("Een ISIN heeft 12 tekens: 2 letters, 9 letters of cijfers en een cijfer (bv. BE0003565737).");
+    state.assets[isin] = { ...state.assets[isin], isin: code, asset_type: v.asset_type, currency: (v.currency || "EUR").toUpperCase(), ref_value_eur: ref, ref_source: v.ref_source };
     commit(); toast(`${isin} bewaard`);
   } catch (err) { toast(err.message, true); }
 });
@@ -766,6 +768,7 @@ $("#imp-confirm").addEventListener("click", () => {
     for (const [isin, a] of Object.entries(r.assets)) {
       state.assets[isin] ??= { name: "", asset_type: kindMap[(a.kind || "").toLowerCase()] || "aandeel", currency: a.currency, ref_value_eur: null, ref_source: "" };
       if (!state.assets[isin].name && a.name) state.assets[isin].name = a.name;
+      if (!state.assets[isin].isin && a.isin) state.assets[isin].isin = a.isin;
     }
     for (const { d, add, mode, price } of delists) {
       const id = `delist:${owner}:${d.asset}:${d.date}`;
@@ -803,11 +806,12 @@ $("#imp-confirm").addEventListener("click", () => {
     const missing = [...need.keys()].filter(a => needsRef(a) && !(state.assets[a]?.ref_value_eur));
     $("#import-dialog").close(); pendingImport = null;
     commit();
-    toast(`${added} transacties geïmporteerd` + (moved ? `; ${moved} ${moved === 1 ? "effect staat" : "effecten staan"} nu onder ISIN/ticker` : "") + (missing.length ? `. Vul nog de waarde op 31/12/2025 in bij Activa voor: ${missing.map(a => state.assets[a]?.name || a).join(", ")}` : ""), missing.length > 0);
+    toast(`${added} transacties geïmporteerd` + (moved ? `; ${moved} ${moved === 1 ? "effect staat" : "effecten staan"} nu onder de naam` : "") + (missing.length ? `. Vul nog de waarde op 31/12/2025 in bij Activa voor: ${missing.map(a => state.assets[a]?.name || a).join(", ")}` : ""), missing.length > 0);
   } catch (err) { toast(err.message, true); }
 });
 
-/** Oude code -> nieuwe code in transacties en activa (Saxo-effecten die vroeger onder de naam stonden). */
+const isIsinCode = k => /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(String(k || ""));
+/** Oude naam -> nieuwe naam in transacties en activa (bv. Saxo-effecten die vroeger onder de ISIN stonden). */
 function moveAssetKeys(plan) {
   let n = 0;
   for (const [from, to] of plan || []) {
@@ -821,6 +825,7 @@ function moveAssetKeys(plan) {
     if (src) {
       const merged = { ...src };
       if (dst) for (const [k, v] of Object.entries(dst)) if (v != null && v !== "") merged[k] = v;
+      if (!merged.isin && isIsinCode(from)) merged.isin = from;
       state.assets[to] = merged;
       delete state.assets[from];
     }
@@ -832,24 +837,24 @@ function moveAssetKeys(plan) {
 // voorbeeld
 function loadExample() {
   const ex = [
-    { type: "BUY", trade_date: "2024-05-01", asset: "BE0003565737", quantity: "100", price: "50", historic_proven: true, broker: "Bolero" },
-    { type: "BUY", trade_date: "2025-05-01", asset: "BE0003565737", quantity: "50", price: "120", historic_proven: true, broker: "Bolero" },
-    { type: "BUY", trade_date: "2026-03-01", asset: "BE0003565737", quantity: "50", price: "90", broker: "Bolero" },
-    { type: "SELL", trade_date: "2026-09-01", asset: "BE0003565737", quantity: "120", price: "110", fees: "7.50", taxes: "4.62", broker: "Bolero" },
-    { type: "BUY", trade_date: "2026-02-01", asset: "US0378331005", quantity: "20", price: "300", currency: "USD", fx_per_eur: "1.20", broker: "Saxo" },
-    { type: "SELL", trade_date: "2026-11-01", asset: "US0378331005", quantity: "20", price: "250", currency: "USD", fx_per_eur: "1.10", broker: "Saxo" },
-    { type: "DIVIDEND", trade_date: "2026-05-01", asset: "BE0003565737", amount: "150", broker: "Bolero" },
+    { type: "BUY", trade_date: "2024-05-01", asset: "VOORBEELD NV", quantity: "100", price: "50", historic_proven: true, broker: "Bolero" },
+    { type: "BUY", trade_date: "2025-05-01", asset: "VOORBEELD NV", quantity: "50", price: "120", historic_proven: true, broker: "Bolero" },
+    { type: "BUY", trade_date: "2026-03-01", asset: "VOORBEELD NV", quantity: "50", price: "90", broker: "Bolero" },
+    { type: "SELL", trade_date: "2026-09-01", asset: "VOORBEELD NV", quantity: "120", price: "110", fees: "7.50", taxes: "4.62", broker: "Bolero" },
+    { type: "BUY", trade_date: "2026-02-01", asset: "VOORBEELD INC.", quantity: "20", price: "300", currency: "USD", fx_per_eur: "1.20", broker: "Saxo" },
+    { type: "SELL", trade_date: "2026-11-01", asset: "VOORBEELD INC.", quantity: "20", price: "250", currency: "USD", fx_per_eur: "1.10", broker: "Saxo" },
+    { type: "DIVIDEND", trade_date: "2026-05-01", asset: "VOORBEELD NV", amount: "150", broker: "Bolero" },
   ];
   for (const raw of ex) {
     const t = validateTx(raw);
     state.assets[t.asset] ??= { name: "", asset_type: "aandeel", currency: t.currency, ref_value_eur: null, ref_source: "" };
     state.transactions.push({ id: state.nextId++, ...t });
   }
-  state.assets["BE0003565737"].name = "Voorbeeld NV";
-  state.assets["BE0003565737"].ref_value_eur = "80";
-  state.assets["BE0003565737"].ref_source = "voorbeeld";
-  state.assets["US0378331005"].name = "Voorbeeld Inc.";
-  state.assets["US0378331005"].currency = "USD";
+  state.assets["VOORBEELD NV"].isin = "BE0003565737";
+  state.assets["VOORBEELD NV"].ref_value_eur = "80";
+  state.assets["VOORBEELD NV"].ref_source = "voorbeeld";
+  state.assets["VOORBEELD INC."].isin = "US0378331005";
+  state.assets["VOORBEELD INC."].currency = "USD";
   state.withheld = state.withheld.filter(w => !(w.owner === DEFAULT_OWNER && w.year === 2026));
   state.withheld.push({ owner: DEFAULT_OWNER, year: 2026, amount: "360" });
   commit(); toast("Voorbeeld geladen. Je kunt het wissen via Instellingen.");

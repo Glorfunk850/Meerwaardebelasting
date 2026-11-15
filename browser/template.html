@@ -177,7 +177,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     <div class="filters">
       <label>Jaar <select id="f-year"><option value="">Alle</option></select></label>
       <label>Eigenaar <select id="f-owner"><option value="">Alle</option></select></label>
-      <label>Actief <input id="f-asset" placeholder="ISIN/ticker" size="12"></label>
+      <label>Actief <input id="f-asset" placeholder="naam" size="12"></label>
     </div>
     <div class="table-wrap"><table id="tx-table"><thead><tr>
       <th>Datum</th><th>Type</th><th>Actief</th><th class="num">Aantal</th><th class="num">Prijs / bedrag</th>
@@ -195,7 +195,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     <p class="muted">Voor elk actief dat je vóór 1 januari 2026 verwierf, is de waarde per stuk op 31/12/2025 nodig
       (slotkoers, omgerekend naar EUR). Activa worden automatisch toegevoegd bij een transactie.</p>
     <div id="asset-missing" class="alert warn" hidden></div>
-    <div class="table-wrap"><table id="asset-table"><thead><tr><th>ISIN/ticker</th><th>Naam</th><th>Type</th><th>Munt</th>
+    <div class="table-wrap"><table id="asset-table"><thead><tr><th>Naam</th><th>ISIN</th><th>Type</th><th>Munt</th>
       <th class="num">Waarde 31/12/2025 (EUR/stuk)</th><th>Bron</th><th></th></tr></thead><tbody></tbody></table></div>
     <p id="asset-empty" class="empty" hidden>Nog geen activa.</p>
   </section>
@@ -261,7 +261,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     <div class="grid">
       <label class="field">Type <select name="type" required></select></label>
       <label class="field">Datum <input name="trade_date" type="date" required></label>
-      <label class="field">Actief (ISIN/ticker) <input name="asset" required autocomplete="off" autocapitalize="characters" list="asset-list"></label>
+      <label class="field">Actief (naam) <input name="asset" required autocomplete="off" autocapitalize="characters" list="asset-list"></label>
       <label class="field">Eigenaar <input name="owner" list="owner-list"></label>
       <label class="field">Broker <input name="broker" list="broker-list" placeholder="bv. Bolero, Saxo"></label>
       <label class="field g-delist">Soort delisting <select name="delist_mode"></select></label>
