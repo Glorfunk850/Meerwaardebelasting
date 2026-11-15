@@ -74,6 +74,15 @@
     const seen = new Map();
     let firstDate = null, lastDate = null;
     const lines = T.rows.filter(({ r }) => r.some(v => v != null && v !== "")).reverse(); // export is aflopend
+    // regels zonder ISIN: ISIN van een andere regel met hetzelfde instrument (naam of symbool) gebruiken
+    const isinByName = new Map(), isinBySymbol = new Map();
+    const instrName = r => { const raw = String(r[c.instr] ?? "").trim(), tag = delistedTag(raw); return norm(tag ? tag.name : raw); };
+    for (const { r } of lines) {
+      const isin = String(r[c.isin] ?? "").trim().toUpperCase(), sym = norm(r[c.symbol]);
+      if (!isin) continue;
+      if (instrName(r)) isinByName.set(instrName(r), isin);
+      if (sym) isinBySymbol.set(sym, isin);
+    }
     for (const { r, n } of lines) {
       const src = `${fileName}:${n}`;
       const type = norm(r[c.type]);
@@ -81,7 +90,8 @@
       if (!date) { warnings.push(`${src}: geen geldige datum, overgeslagen.`); continue; }
       if (type && type !== "transactie") { skipped[`Type '${r[c.type]}'`] = (skipped[`Type '${r[c.type]}'`] || 0) + 1; continue; }
       const oc = norm(r[c.openClose]);
-      const isin = String(r[c.isin] ?? "").trim().toUpperCase();
+      const isin = String(r[c.isin] ?? "").trim().toUpperCase()
+        || isinByName.get(instrName(r)) || (norm(r[c.symbol]) && isinBySymbol.get(norm(r[c.symbol]))) || "";
       const rawName = String(r[c.instr] ?? "").trim();
       const tag = delistedTag(rawName);
       const name = tag ? tag.name : rawName;

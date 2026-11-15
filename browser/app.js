@@ -383,7 +383,7 @@ function renderTransactions() {
         ${t.historic_proven ? `<span class="badge" title="Historische prijs bewijsbaar">H</span>` : ""}
         ${!t.cost_known ? `<span class="badge need" title="Aanschaffingswaarde onbekend">?</span>` : ""}
         ${t.type === "DELISTING" ? `<span class="badge">${esc(DELIST_SHORT[t.delist_mode] || "")}</span>` : ""}</td>
-      <td>${esc(t.asset)}</td>
+      <td>${esc(t.asset)}${state.assets[t.asset]?.name && !t.asset.includes(state.assets[t.asset].name.toUpperCase()) ? `<br><span class="small muted">${esc(state.assets[t.asset].name)}</span>` : ""}</td>
       <td class="num">${["SPLIT", "DIVIDEND", "FEE"].includes(t.type) || (t.type === "DELISTING" && D(t.quantity || 0).isZero()) ? "" : num(t.quantity)}</td>
       <td class="num">${value}</td>
       <td>${esc(t.currency)}${t.currency !== "EUR" ? ` <span class="muted small">@${num(t.fx_per_eur)}</span>` : ""}</td>
@@ -425,6 +425,11 @@ function updateFieldVisibility() {
 ["type", "trade_date", "cost_known", "delist_mode"].forEach(n => form.elements[n].addEventListener("change", updateFieldVisibility));
 form.elements.currency.addEventListener("input", () => { if (form.elements.currency.value.trim().toUpperCase() === "EUR") form.elements.fx_per_eur.value = "1"; });
 
+function showAssetName() {
+  const k = form.elements.asset.value.trim().toUpperCase(), a = state.assets[k];
+  $("#asset-name-hint").textContent = !a ? "" : AS.isNameKey(k) ? "Geen ISIN: vul die in bij Activa (of laat ze daar opzoeken)." : (a.name || "");
+}
+form.elements.asset.addEventListener("input", showAssetName);
 function openTxDialog(tx) {
   form.reset();
   editingId = tx ? tx.id : null;
@@ -437,6 +442,7 @@ function openTxDialog(tx) {
     if (el && el.name) { if (el.type === "checkbox") el.checked = !!v; else el.value = v ?? ""; }
   } else form.elements.trade_date.value = new Date().toISOString().slice(0, 10);
   if (tx && tx.type === "DELISTING" && D(tx.quantity || 0).isZero()) form.elements.quantity.value = "";
+  showAssetName();
   updateFieldVisibility();
   dlg.showModal();
 }
@@ -568,8 +574,8 @@ const ISIN_ERRORS = {
   cancelled: "Geannuleerd.",
 };
 let isinAbort = null;
-$("#btn-isin-lookup").addEventListener("click", async () => {
-  const items = AS.isinCandidates(state);
+$("#btn-isin-lookup").addEventListener("click", () => startIsinLookup(AS.isinCandidates(state)));
+async function startIsinLookup(items) {
   if (!sampleFn || !items.length) return;
   isinRows = [];
   $("#isin-table tbody").innerHTML = "";
@@ -589,7 +595,7 @@ $("#btn-isin-lookup").addEventListener("click", async () => {
   } catch (e) {
     $("#isin-status").textContent = ISIN_ERRORS[e && e.code] || `Opzoeken mislukt${e && e.code ? ` (${e.code})` : ""}.`;
   } finally { isinAbort = null; }
-});
+}
 function renderIsinRows() {
   $("#isin-table tbody").innerHTML = isinRows.map((r, i) => {
     const exists = r.isin && state.assets[r.isin];
@@ -833,6 +839,7 @@ $("#imp-cancel").addEventListener("click", () => { $("#import-dialog").close(); 
 $("#imp-confirm").addEventListener("click", () => {
   const r = pendingImport; if (!r) return;
   const owner = $("#imp-owner").value.trim() || DEFAULT_OWNER;
+  const knownBefore = new Set(Object.keys(state.assets));
   try {
     // fotowaarden valideren vóór er iets verandert
     const decisions = $$("#imp-positions tbody tr[data-i]").map(tr => {
@@ -893,6 +900,9 @@ $("#imp-confirm").addEventListener("click", () => {
     $("#import-dialog").close(); pendingImport = null;
     commit();
     toast(`${added} transacties geïmporteerd` + (missing.length ? `. Vul nog de waarde op 31/12/2025 in bij Activa voor: ${missing.map(a => state.assets[a]?.name || a).join(", ")}` : ""), missing.length > 0);
+    // nieuwe effecten zonder ISIN (Bolero, of Saxo zonder ISIN-kolom): meteen laten opzoeken, de gebruiker bevestigt
+    const fresh = AS.isinCandidates(state).filter(i => !knownBefore.has(i.key));
+    if (fresh.length && sampleFn) startIsinLookup(fresh);
   } catch (err) { toast(err.message, true); }
 });
 

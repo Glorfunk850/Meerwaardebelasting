@@ -81,3 +81,15 @@ test("real export (optional)", { skip: !process.env.SAXO_FILE }, async () => {
   // kostprijs: |boekingsbedrag| ≈ verhandelde waarde in EUR ± kosten (afronding)
   for (const t of r.transactions) assert.ok(M.D(t.fx_per_eur).gt(0));
 });
+
+test("regel zonder ISIN krijgt de ISIN van hetzelfde instrument uit een andere regel", () => {
+  const sh = sheets();
+  sh.Transacties.push(
+    row({ date: "2026-02-02", id: "T7", action: "Koop 3 @ 40.00 EUR", amount: -122.00, costs: -2, name: "Voorbeeld ETF Acc", isin: null, qty: 3, price: 40 }),
+    row({ date: "2026-01-02", id: "T6", action: "Koop 2 @ 40.00 EUR", amount: -82.00, costs: -2, name: "Voorbeeld ETF Acc", isin: "IE0000000009", qty: 2, price: 40 }),
+    row({ date: "2026-01-03", id: "T8", action: "Koop 1 @ 9.00 EUR", amount: -11.00, costs: -2, name: "Zonder Code NV", isin: null, qty: 1, price: 9 }));
+  const r = S.parseSaxoSheets(sh);
+  assert.deepEqual(r.transactions.filter(t => t.note.startsWith("Voorbeeld ETF")).map(t => t.asset), ["IE0000000009", "IE0000000009"]);
+  assert.equal(r.transactions.find(t => t.note.startsWith("Zonder Code")).asset, "ZONDER CODE NV");
+  assert.ok(!r.warnings.some(w => w.includes("Voorbeeld ETF") && w.includes("geen ISIN")));
+});

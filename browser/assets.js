@@ -111,7 +111,7 @@
   /** Opdracht voor Claude: geef per effect de ISIN, of null als je het niet zeker weet. */
   function isinPrompt(items) {
     return [
-      "Je helpt een Belgische belegger de ISIN-codes te vinden van effecten uit een broker-export (Bolero).",
+      "Je helpt een Belgische belegger de ISIN-codes te vinden van effecten uit een broker-export (Bolero of Saxo).",
       "De namen zijn door de broker afgekort en in hoofdletters. De beurscode tussen haakjes betekent: " + EXCHANGES + ".",
       "Geef voor elk effect de ISIN van precies dat effect (aandeel, ETF of fonds) zoals het op die beurs noteert.",
       "Raad niet: ben je niet zeker welk effect bedoeld wordt, geef dan isin null. Een fout ISIN is erger dan geen.",
