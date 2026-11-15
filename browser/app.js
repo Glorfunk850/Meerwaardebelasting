@@ -483,45 +483,59 @@ function renderAssets() {
   // behalve als er nog een waarde op 31/12/2025 ontbreekt (nodig voor de berekening van die verkoop)
   const cfg = { ...defaultConfig(), fifoScope: state.settings.fifo_scope };
   const held = new Set(window.MWB.holdingsAt(state.transactions, "9999-12-31", cfg).map(h => h.asset));
-  const closed = ([isin, a]) => state.transactions.some(t => t.asset === isin) && !held.has(isin) && !refMissing(isin, a);
-  const nClosed = all.filter(closed).length, showClosed = $("#asset-show-closed").checked;
-  $("#asset-closed-toggle").hidden = !nClosed;
-  $("#asset-closed-count").textContent = nClosed;
-  const list = showClosed ? all : all.filter(e => !closed(e));
+  const used = isin => state.transactions.some(t => t.asset === isin);
+  const closed = ([isin, a]) => used(isin) && !held.has(isin) && !refMissing(isin, a);
+  // ook verborgen: door de gebruiker uit de lijst verwijderd terwijl er nog transacties naar verwijzen
+  const hidden = e => !!e[1].hidden || closed(e);
+  const nHidden = all.filter(hidden).length, showHidden = $("#asset-show-closed").checked;
+  $("#asset-closed-toggle").hidden = !nHidden;
+  $("#asset-closed-count").textContent = nHidden;
+  const list = showHidden ? all : all.filter(e => !hidden(e));
   $("#asset-empty").hidden = list.length > 0;
   $("#asset-empty").textContent = all.length ? "Geen activa meer in portefeuille." : "Nog geen activa.";
-  const missing = list.filter(([i, a]) => refMissing(i, a)).length;
+  const missingAll = all.filter(([i, a]) => refMissing(i, a)), missing = missingAll.length;
+  const missingHidden = showHidden ? 0 : missingAll.filter(hidden).length;
   $("#asset-missing").hidden = !missing;
-  $("#asset-missing").textContent = `${missing === 1 ? "1 effect" : `${missing} effecten`} die je op 31/12/2025 had, ${missing === 1 ? "heeft" : "hebben"} nog geen waarde op 31/12/2025. Die is nodig zodra je ze verkoopt.`;
+  $("#asset-missing").textContent = `${missing === 1 ? "1 effect" : `${missing} effecten`} die je op 31/12/2025 had, ${missing === 1 ? "heeft" : "hebben"} nog geen waarde op 31/12/2025. Die is nodig zodra je ze verkoopt.`
+    + (missingHidden ? ` (${missingHidden} daarvan ${missingHidden === 1 ? "is" : "zijn"} verborgen: vink "Toon ook verborgen" aan.)` : "");
   $("#asset-table tbody").innerHTML = list.map(([isin, a]) => {
-    const need = needsRef(isin), used = state.transactions.some(t => t.asset === isin), gone = closed([isin, a]);
-    return `<tr data-isin="${esc(isin)}"${gone ? ` class="muted"` : ""}>
+    const need = needsRef(isin), u = used(isin), gone = closed([isin, a]);
+    return `<tr data-isin="${esc(isin)}"${hidden([isin, a]) ? ` class="muted"` : ""}>
       <td><strong>${esc(isin)}</strong>${need && (a.ref_value_eur == null || a.ref_value_eur === "") ? ` <span class="badge need">waarde nodig</span>` : ""}
         ${delistedOn(isin) ? ` <span class="badge" title="Delisting geregistreerd">geschrapt ${esc(delistedOn(isin))}</span>` : ""}
-        ${gone ? ` <span class="badge" title="Niet meer in portefeuille">afgesloten</span>` : ""}</td>
+        ${gone ? ` <span class="badge" title="Niet meer in portefeuille">afgesloten</span>` : ""}
+        ${a.hidden ? ` <span class="badge" title="Door jou uit de lijst verwijderd">verborgen</span>` : ""}</td>
       <td><input name="name" value="${esc(a.name)}" aria-label="Naam"></td>
       <td><select name="asset_type" aria-label="Type">${ASSET_TYPES.map(t => `<option ${t === a.asset_type ? "selected" : ""}>${t}</option>`).join("")}</select></td>
       <td><input name="currency" value="${esc(a.currency)}" maxlength="5" class="w-sm" aria-label="Munt"></td>
       <td><input name="ref_value_eur" inputmode="decimal" class="num" value="${esc(a.ref_value_eur ?? "")}" placeholder="${need ? "verplicht" : "n.v.t."}" aria-label="Waarde 31/12/2025"></td>
       <td><input name="ref_source" value="${esc(a.ref_source)}" placeholder="bv. Euronext slotkoers" aria-label="Bron"></td>
       <td class="actions-cell"><button class="btn small primary" data-save>Bewaar</button>
-        ${used ? "" : `<button class="btn small danger" data-delasset aria-label="Verwijder">✕</button>`}</td></tr>`;
+        ${a.hidden ? `<button class="btn small" data-unhide>Terugzetten</button>`
+          : gone ? "" : `<button class="btn small danger" data-delasset data-used="${u ? 1 : ""}" aria-label="Verwijder uit de lijst" title="Verwijder uit de lijst">✕</button>`}</td></tr>`;
   }).join("");
 }
 $("#asset-show-closed").addEventListener("change", renderAssets);
 $("#asset-table").addEventListener("click", async e => {
   const row = e.target.closest("tr[data-isin]");
   if (!row) return;
-  const isin = row.dataset.isin;
-  if (e.target.closest("[data-delasset]")) {
-    if (await confirmDialog(`Actief ${isin} verwijderen?`)) { delete state.assets[isin]; commit(); }
+  const isin = row.dataset.isin, label = state.assets[isin]?.name ? `${state.assets[isin].name} (${isin})` : isin;
+  const del = e.target.closest("[data-delasset]");
+  if (del) {
+    if (!del.dataset.used) {
+      if (await confirmDialog(`Actief ${label} verwijderen?`)) { delete state.assets[isin]; commit(); }
+    } else if (await confirmDialog(`${label} uit de lijst verwijderen? Er zijn nog transacties voor dit actief: die blijven bewaard ` +
+        `en tellen mee in het rapport, net als de ingevulde waarde op 31/12/2025. Terugzetten kan via "Toon ook verborgen".`)) {
+      state.assets[isin].hidden = true; commit(); toast(`${label} verwijderd uit de lijst`);
+    }
     return;
   }
+  if (e.target.closest("[data-unhide]")) { delete state.assets[isin].hidden; commit(); toast(`${label} teruggezet`); return; }
   if (!e.target.closest("[data-save]")) return;
   const v = {}; $$("input, select", row).forEach(el => { v[el.name] = el.value.trim(); });
   try {
     const ref = dec(v.ref_value_eur, "waarde 31/12/2025", { nonNegative: true });
-    state.assets[isin] = { name: v.name, asset_type: v.asset_type, currency: (v.currency || "EUR").toUpperCase(), ref_value_eur: ref, ref_source: v.ref_source };
+    state.assets[isin] = { ...state.assets[isin], name: v.name, asset_type: v.asset_type, currency: (v.currency || "EUR").toUpperCase(), ref_value_eur: ref, ref_source: v.ref_source };
     commit(); toast(`${isin} bewaard`);
   } catch (err) { toast(err.message, true); }
 });
