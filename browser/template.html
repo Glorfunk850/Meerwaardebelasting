@@ -189,7 +189,9 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
   </section>
 
   <section id="tab-activa" class="tab">
-    <div class="toolbar"><h2>Activa</h2></div>
+    <div class="toolbar"><h2>Activa</h2>
+      <label class="check" id="asset-closed-toggle" hidden><input type="checkbox" id="asset-show-closed">
+        Toon ook activa die niet meer in portefeuille zitten (<span id="asset-closed-count">0</span>)</label></div>
     <p class="muted">Voor elk actief dat je vóór 1 januari 2026 verwierf, is de waarde per stuk op 31/12/2025 nodig
       (slotkoers, omgerekend naar EUR). Activa worden automatisch toegevoegd bij een transactie.</p>
     <div id="asset-missing" class="alert warn" hidden></div>

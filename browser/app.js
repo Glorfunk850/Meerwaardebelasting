@@ -477,16 +477,28 @@ $("#f-asset").addEventListener("input", renderTransactions);
 
 // ================================================================ activa
 function renderAssets() {
-  const list = Object.entries(state.assets).sort(([a], [b]) => a.localeCompare(b));
+  const all = Object.entries(state.assets).sort(([a], [b]) => a.localeCompare(b));
+  const refMissing = (isin, a) => needsRef(isin) && (a.ref_value_eur == null || a.ref_value_eur === "");
+  // activa die niet meer in portefeuille zitten (alles verkocht/uitgekocht) standaard verbergen,
+  // behalve als er nog een waarde op 31/12/2025 ontbreekt (nodig voor de berekening van die verkoop)
+  const cfg = { ...defaultConfig(), fifoScope: state.settings.fifo_scope };
+  const held = new Set(window.MWB.holdingsAt(state.transactions, "9999-12-31", cfg).map(h => h.asset));
+  const closed = ([isin, a]) => state.transactions.some(t => t.asset === isin) && !held.has(isin) && !refMissing(isin, a);
+  const nClosed = all.filter(closed).length, showClosed = $("#asset-show-closed").checked;
+  $("#asset-closed-toggle").hidden = !nClosed;
+  $("#asset-closed-count").textContent = nClosed;
+  const list = showClosed ? all : all.filter(e => !closed(e));
   $("#asset-empty").hidden = list.length > 0;
-  const missing = list.filter(([i, a]) => needsRef(i) && (a.ref_value_eur == null || a.ref_value_eur === "")).length;
+  $("#asset-empty").textContent = all.length ? "Geen activa meer in portefeuille." : "Nog geen activa.";
+  const missing = list.filter(([i, a]) => refMissing(i, a)).length;
   $("#asset-missing").hidden = !missing;
   $("#asset-missing").textContent = `${missing === 1 ? "1 effect" : `${missing} effecten`} die je op 31/12/2025 had, ${missing === 1 ? "heeft" : "hebben"} nog geen waarde op 31/12/2025. Die is nodig zodra je ze verkoopt.`;
   $("#asset-table tbody").innerHTML = list.map(([isin, a]) => {
-    const need = needsRef(isin), used = state.transactions.some(t => t.asset === isin);
-    return `<tr data-isin="${esc(isin)}">
+    const need = needsRef(isin), used = state.transactions.some(t => t.asset === isin), gone = closed([isin, a]);
+    return `<tr data-isin="${esc(isin)}"${gone ? ` class="muted"` : ""}>
       <td><strong>${esc(isin)}</strong>${need && (a.ref_value_eur == null || a.ref_value_eur === "") ? ` <span class="badge need">waarde nodig</span>` : ""}
-        ${delistedOn(isin) ? ` <span class="badge" title="Delisting geregistreerd">geschrapt ${esc(delistedOn(isin))}</span>` : ""}</td>
+        ${delistedOn(isin) ? ` <span class="badge" title="Delisting geregistreerd">geschrapt ${esc(delistedOn(isin))}</span>` : ""}
+        ${gone ? ` <span class="badge" title="Niet meer in portefeuille">afgesloten</span>` : ""}</td>
       <td><input name="name" value="${esc(a.name)}" aria-label="Naam"></td>
       <td><select name="asset_type" aria-label="Type">${ASSET_TYPES.map(t => `<option ${t === a.asset_type ? "selected" : ""}>${t}</option>`).join("")}</select></td>
       <td><input name="currency" value="${esc(a.currency)}" maxlength="5" class="w-sm" aria-label="Munt"></td>
@@ -496,6 +508,7 @@ function renderAssets() {
         ${used ? "" : `<button class="btn small danger" data-delasset aria-label="Verwijder">✕</button>`}</td></tr>`;
   }).join("");
 }
+$("#asset-show-closed").addEventListener("change", renderAssets);
 $("#asset-table").addEventListener("click", async e => {
   const row = e.target.closest("tr[data-isin]");
   if (!row) return;
