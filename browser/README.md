@@ -26,7 +26,6 @@ python3 build.py                 # maakt index.html
 node --test engine.test.js       # rekenkern
 node --test bolero.test.js       # Bolero-importer (synthetisch bestand)
 node --test saxo.test.js         # Saxo-importer (synthetisch bestand)
-node --test assets.test.js       # sleutels (ISIN/ticker) en namen van activa
 
 # optioneel tegen je eigen exports:
 BOLERO_FILE=pad/naar/cashmovements.csv node --test bolero.test.js

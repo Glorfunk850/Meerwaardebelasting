@@ -71,10 +71,7 @@ test("parse sample export", () => {
   assert.equal(r.refHints["VOORBEELD NV (PA)"].value, "8.5");
   // posities op 31/12/2025: Voorbeeld 150+100, Oud 50, US Corp 10, Verdwenen 100 (geen dividend -> verdacht)
   const pos = Object.fromEntries(r.positions.map(p => [p.asset, p]));
-  assert.equal(pos["VOORBEELD NV (PA)"].quantity, "250"); assert.equal(pos["VOORBEELD NV (PA)"].name, "VOORBEELD NV");
-  // namen zonder beurscode, ook voor activa met enkel dividenden
-  assert.equal(r.assets["US CORP (NY)"].name, "US CORP");
-  assert.equal(B.displayName("CP OUD NV (BR) 02.05.24"), "OUD NV"); assert.equal(pos["VOORBEELD NV (PA)"].suspicious, false);
+  assert.equal(pos["VOORBEELD NV (PA)"].quantity, "250"); assert.equal(pos["VOORBEELD NV (PA)"].suspicious, false);
   assert.equal(pos["VERDWENEN INC (NY)"].suspicious, true);
   assert.equal(pos["OUD NV (BR)"].suspicious, true); // laatste dividend 2024-05 en geen activiteit in 2026
   assert.equal(pos["US CORP (NY)"].suspicious, false); // verkocht in 2026
