@@ -190,6 +190,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
 
   <section id="tab-activa" class="tab">
     <div class="toolbar"><h2>Activa</h2>
+      <button class="btn ghost" id="btn-isin-lookup" hidden title="Laat Claude de ISIN voorstellen voor effecten die nog een naam als code hebben">ISIN's laten opzoeken</button>
       <label class="check" id="asset-closed-toggle" hidden><input type="checkbox" id="asset-show-closed">
         Toon ook activa die niet meer in portefeuille zitten (<span id="asset-closed-count">0</span>)</label></div>
     <p class="muted">Voor elk actief dat je vóór 1 januari 2026 verwierf, is de waarde per stuk op 31/12/2025 nodig
@@ -312,6 +313,16 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     <ul id="imp-warnings" class="small"></ul></details>
   <p class="hint">Aankopen van vóór 2026 worden gemarkeerd als "historische prijs bewijsbaar": de afrekeningen van je broker gelden als bewijs. Pas dat per transactie aan als nodig.</p>
   <div class="actions"><button class="btn ghost" id="imp-cancel">Annuleren</button><button class="btn primary" id="imp-confirm">Importeren</button></div>
+</div></dialog>
+
+<dialog id="isin-dialog" style="width:min(860px,96vw)"><div class="body">
+  <h3>Voorgestelde ISIN's</h3>
+  <p class="hint">Claude stelt deze codes voor op basis van de naam en de beurs uit de export. Het antwoord komt uit Claude's kennis,
+    niet uit een officiële databank: controleer elke code (bv. op de site van de beurs of je broker) voor je ze overneemt.
+    Codes met een fout controlecijfer zijn al weggelaten. Je kunt een code ook aanpassen.</p>
+  <p id="isin-status" class="muted small"></p>
+  <div class="table-wrap"><table id="isin-table"><thead><tr><th>Overnemen</th><th>Effect</th><th>Voorgestelde ISIN</th><th>Zekerheid</th><th>Opmerking</th></tr></thead><tbody></tbody></table></div>
+  <div class="actions"><button class="btn ghost" id="isin-cancel">Annuleren</button><button class="btn primary" id="isin-apply" disabled>Aangevinkte overnemen</button></div>
 </div></dialog>
 
 <dialog id="confirm-dialog" style="width:min(420px,92vw)"><div class="body">
@@ -1021,7 +1032,70 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     return n;
   }
 
-  const api = { isIsin, isNameKey, nameFromKey, fillNames, applyAliases, renameAsset, normKey };
+  // ------------------------------------------------------------ ISIN's laten voorstellen
+  /** Controlecijfer van een ISIN (ISO 6166): letters -> 10..35, dan Luhn over alle cijfers. */
+  function isinChecksumOk(isin) {
+    if (!isIsin(isin)) return false;
+    const digits = [...isin].map(c => (/[0-9]/.test(c) ? c : String(c.charCodeAt(0) - 55))).join("");
+    let sum = 0;
+    for (let i = 0; i < digits.length; i++) {
+      let d = Number(digits[digits.length - 1 - i]);
+      if (i % 2 === 1) { d *= 2; if (d > 9) d -= 9; }
+      sum += d;
+    }
+    return sum % 10 === 0;
+  }
+
+  /** Activa zonder ISIN als sleutel, met wat Claude nodig heeft om ze te herkennen (geen bedragen). */
+  function isinCandidates(state) {
+    return Object.entries(state.assets || {})
+      .filter(([k]) => !isIsin(k))
+      .map(([k, a]) => {
+        const m = /\((\w\w)\)$/.exec(k);
+        return { key: k, name: (a && a.name) || nameFromKey(k), exchange: m ? m[1] : "", currency: (a && a.currency) || "" };
+      });
+  }
+
+  const EXCHANGES = "BR=Euronext Brussel, PA=Euronext Parijs, AS=Euronext Amsterdam, LS=Euronext Lissabon, MI=Milaan, MC=Madrid, " +
+    "FR/DE/XE=Duitsland, VI=Wenen, HE=Helsinki, IR=Dublin, DU=Düsseldorf, NY=New York (NYSE), NA=Nasdaq, LO=Londen, " +
+    "OS=Oslo, ST=Stockholm, CO=Kopenhagen, SW=Zwitserland, TO=Toronto, MO=Montreal";
+
+  /** Opdracht voor Claude: geef per effect de ISIN, of null als je het niet zeker weet. */
+  function isinPrompt(items) {
+    return [
+      "Je helpt een Belgische belegger de ISIN-codes te vinden van effecten uit een broker-export (Bolero).",
+      "De namen zijn door de broker afgekort en in hoofdletters. De beurscode tussen haakjes betekent: " + EXCHANGES + ".",
+      "Geef voor elk effect de ISIN van precies dat effect (aandeel, ETF of fonds) zoals het op die beurs noteert.",
+      "Raad niet: ben je niet zeker welk effect bedoeld wordt, geef dan isin null. Een fout ISIN is erger dan geen.",
+      "Antwoord ALLEEN met JSON in deze vorm, één element per effect, met dezelfde key:",
+      '[{"key": "...", "isin": "XX0000000000" of null, "ticker": "..." of null, "official_name": "..." of null, "confidence": "hoog" | "middel" | "laag", "remark": "korte uitleg of leeg"}]',
+      "",
+      "Effecten:",
+      JSON.stringify(items.map(i => ({ key: i.key, name: i.name, exchange: i.exchange || null, currency: i.currency || null }))),
+    ].join("\n");
+  }
+
+  /** Antwoord van Claude controleren: enkel gekende sleutels, geldig ISIN-formaat en controlecijfer. */
+  function parseIsinAnswer(answer, items) {
+    const list = Array.isArray(answer) ? answer : Array.isArray(answer && answer.results) ? answer.results : [];
+    const byKey = new Map(items.map(i => [i.key, i]));
+    const out = new Map();
+    for (const r of list) {
+      if (!r || typeof r !== "object" || !byKey.has(r.key) || out.has(r.key)) continue;
+      const isin = r.isin ? normKey(r.isin).replace(/\s/g, "") : "";
+      const confidence = ["hoog", "middel", "laag"].includes(r.confidence) ? r.confidence : "laag";
+      let problem = "";
+      if (!isin) problem = "niet gevonden";
+      else if (!isIsin(isin)) problem = "geen geldig ISIN-formaat";
+      else if (!isinChecksumOk(isin)) problem = "controlecijfer klopt niet";
+      out.set(r.key, { ...byKey.get(r.key), isin: problem ? "" : isin, ticker: String(r.ticker || "").trim(),
+        official_name: String(r.official_name || "").trim(), confidence, remark: String(r.remark || "").trim(), problem });
+    }
+    return items.map(i => out.get(i.key) || { ...i, isin: "", ticker: "", official_name: "", confidence: "laag", remark: "", problem: "geen antwoord" });
+  }
+
+  const api = { isIsin, isNameKey, nameFromKey, fillNames, applyAliases, renameAsset, normKey,
+    isinChecksumOk, isinCandidates, isinPrompt, parseIsinAnswer };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.ASSETS = api;
 })(typeof window !== "undefined" ? window : globalThis);
 </script>
@@ -1765,6 +1839,7 @@ $("#f-asset").addEventListener("input", renderTransactions);
 
 // ================================================================ activa
 function renderAssets() {
+  updateIsinButton();
   const all = Object.entries(state.assets).sort(([a], [b]) => a.localeCompare(b));
   const refMissing = (isin, a) => needsRef(isin) && (a.ref_value_eur == null || a.ref_value_eur === "");
   // activa die niet meer in portefeuille zitten (alles verkocht/uitgekocht) standaard verbergen,
@@ -1788,6 +1863,7 @@ function renderAssets() {
     const need = needsRef(isin), u = used(isin), gone = closed([isin, a]);
     const badges = [
       AS.isNameKey(isin) ? `<span class="badge" title="De export bevat geen ISIN; de naam wordt als sleutel gebruikt. Vul de ISIN of ticker in en klik Bewaar.">geen ISIN</span>` : "",
+      a.isin_source && AS.isIsin(isin) ? `<span class="badge" title="${esc(a.isin_source)}">ISIN via Claude</span>` : "",
       need && (a.ref_value_eur == null || a.ref_value_eur === "") ? `<span class="badge need">waarde nodig</span>` : "",
       delistedOn(isin) ? `<span class="badge" title="Delisting geregistreerd">geschrapt ${esc(delistedOn(isin))}</span>` : "",
       gone ? `<span class="badge" title="Niet meer in portefeuille">afgesloten</span>` : "",
@@ -1833,6 +1909,83 @@ $("#asset-table").addEventListener("click", async e => {
     if (key !== isin) AS.renameAsset(state, isin, key);
     commit(); toast(key !== isin ? `${isin} heet nu ${key}; een volgende import gebruikt ook ${key}` : `${key} bewaard`);
   } catch (err) { toast(err.message, true); }
+});
+
+// ---------------------------------------------------------------- ISIN's laten voorstellen door Claude
+let sampleFn = null, isinRows = [];
+(async () => {
+  try { if (window.claude && typeof window.claude.use === "function") sampleFn = await window.claude.use("sample"); } catch { sampleFn = null; }
+  render();
+})();
+function updateIsinButton() {
+  $("#btn-isin-lookup").hidden = !sampleFn || !AS.isinCandidates(state).length;
+}
+const ISIN_ERRORS = {
+  not_granted: "Je gaf geen toestemming om Claude te gebruiken op deze pagina.",
+  rate_limited: "Even te veel vragen na elkaar. Probeer het straks opnieuw.",
+  invalid_json: "Claude gaf geen bruikbaar antwoord. Probeer het opnieuw.",
+  cancelled: "Geannuleerd.",
+};
+let isinAbort = null;
+$("#btn-isin-lookup").addEventListener("click", async () => {
+  const items = AS.isinCandidates(state);
+  if (!sampleFn || !items.length) return;
+  isinRows = [];
+  $("#isin-table tbody").innerHTML = "";
+  $("#isin-apply").disabled = true;
+  $("#isin-status").textContent = `Claude zoekt de ISIN van ${items.length} ${items.length === 1 ? "effect" : "effecten"}… Dit kan een minuut duren.`;
+  $("#isin-dialog").showModal();
+  isinAbort = new AbortController();
+  try {
+    for (let i = 0; i < items.length; i += 40) { // in delen, zodat een lange lijst niet afgekapt wordt
+      const part = items.slice(i, i + 40);
+      const answer = await sampleFn.json(AS.isinPrompt(part), { modelTier: "complex", signal: isinAbort.signal });
+      isinRows.push(...AS.parseIsinAnswer(answer, part));
+      renderIsinRows();
+    }
+    const found = isinRows.filter(r => r.isin).length;
+    $("#isin-status").textContent = `${found} van ${isinRows.length} gevonden. Controleer ze voor je ze overneemt.`;
+  } catch (e) {
+    $("#isin-status").textContent = ISIN_ERRORS[e && e.code] || `Opzoeken mislukt${e && e.code ? ` (${e.code})` : ""}.`;
+  } finally { isinAbort = null; }
+});
+function renderIsinRows() {
+  $("#isin-table tbody").innerHTML = isinRows.map((r, i) => {
+    const exists = r.isin && state.assets[r.isin];
+    return `<tr data-r="${i}">
+      <td><input type="checkbox" name="take" ${r.isin && r.confidence !== "laag" ? "checked" : ""} ${r.isin ? "" : "disabled"} aria-label="Overnemen"></td>
+      <td><strong>${esc(r.name)}</strong><br><span class="small muted">${esc(r.key)}</span>
+        ${r.official_name ? `<br><span class="small">${esc(r.official_name)}${r.ticker ? ` · ${esc(r.ticker)}` : ""}</span>` : ""}</td>
+      <td><input name="isin" value="${esc(r.isin)}" class="key" placeholder="${esc(r.problem || "ISIN")}" aria-label="ISIN">
+        ${exists ? `<span class="hint">bestaat al: wordt samengevoegd</span>` : ""}</td>
+      <td>${r.isin ? `<span class="badge ${r.confidence === "hoog" ? "ok" : r.confidence === "laag" ? "need" : ""}">${esc(r.confidence)}</span>` : `<span class="muted small">${esc(r.problem)}</span>`}</td>
+      <td class="small" style="white-space:normal;min-width:180px">${esc(r.remark)}</td></tr>`;
+  }).join("");
+  $("#isin-apply").disabled = !isinRows.some(r => r.isin);
+}
+$("#isin-table").addEventListener("input", e => {
+  const tr = e.target.closest("tr[data-r]"); if (!tr || e.target.name !== "isin") return;
+  const v = AS.normKey(e.target.value), ok = AS.isinChecksumOk(v), box = $("[name=take]", tr);
+  box.disabled = !ok; if (!ok) box.checked = false;
+  $("#isin-apply").disabled = !$$("#isin-table [name=take]").some(b => !b.disabled);
+});
+$("#isin-cancel").addEventListener("click", () => { isinAbort?.abort(); $("#isin-dialog").close(); });
+$("#isin-apply").addEventListener("click", async () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const picks = $$("#isin-table tbody tr[data-r]").map(tr => ({ r: isinRows[Number(tr.dataset.r)], isin: AS.normKey($("[name=isin]", tr).value), take: $("[name=take]", tr).checked }))
+    .filter(x => x.take && AS.isinChecksumOk(x.isin) && state.assets[x.r.key] && x.r.key !== x.isin);
+  const merges = picks.filter(x => state.assets[x.isin]);
+  if (merges.length && !(await confirmDialog(`${merges.map(x => `${x.r.name} → ${x.isin}`).join(", ")}: deze ISIN bestaat al. Samenvoegen?`))) return;
+  for (const { r, isin } of picks) {
+    AS.renameAsset(state, r.key, isin);
+    const a = state.assets[isin];
+    a.isin_source = `voorgesteld door Claude, bevestigd op ${today}`;
+    if (!a.name && r.official_name) a.name = r.official_name;
+  }
+  $("#isin-dialog").close();
+  commit();
+  const n = picks.length;
+  toast(n ? `${n} ${n === 1 ? "ISIN" : "ISIN's"} overgenomen; een volgende import gebruikt ook deze codes` : "Niets overgenomen");
 });
 
 // ================================================================ instellingen

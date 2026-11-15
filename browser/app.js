@@ -480,6 +480,7 @@ $("#f-asset").addEventListener("input", renderTransactions);
 
 // ================================================================ activa
 function renderAssets() {
+  updateIsinButton();
   const all = Object.entries(state.assets).sort(([a], [b]) => a.localeCompare(b));
   const refMissing = (isin, a) => needsRef(isin) && (a.ref_value_eur == null || a.ref_value_eur === "");
   // activa die niet meer in portefeuille zitten (alles verkocht/uitgekocht) standaard verbergen,
@@ -503,6 +504,7 @@ function renderAssets() {
     const need = needsRef(isin), u = used(isin), gone = closed([isin, a]);
     const badges = [
       AS.isNameKey(isin) ? `<span class="badge" title="De export bevat geen ISIN; de naam wordt als sleutel gebruikt. Vul de ISIN of ticker in en klik Bewaar.">geen ISIN</span>` : "",
+      a.isin_source && AS.isIsin(isin) ? `<span class="badge" title="${esc(a.isin_source)}">ISIN via Claude</span>` : "",
       need && (a.ref_value_eur == null || a.ref_value_eur === "") ? `<span class="badge need">waarde nodig</span>` : "",
       delistedOn(isin) ? `<span class="badge" title="Delisting geregistreerd">geschrapt ${esc(delistedOn(isin))}</span>` : "",
       gone ? `<span class="badge" title="Niet meer in portefeuille">afgesloten</span>` : "",
@@ -548,6 +550,83 @@ $("#asset-table").addEventListener("click", async e => {
     if (key !== isin) AS.renameAsset(state, isin, key);
     commit(); toast(key !== isin ? `${isin} heet nu ${key}; een volgende import gebruikt ook ${key}` : `${key} bewaard`);
   } catch (err) { toast(err.message, true); }
+});
+
+// ---------------------------------------------------------------- ISIN's laten voorstellen door Claude
+let sampleFn = null, isinRows = [];
+(async () => {
+  try { if (window.claude && typeof window.claude.use === "function") sampleFn = await window.claude.use("sample"); } catch { sampleFn = null; }
+  render();
+})();
+function updateIsinButton() {
+  $("#btn-isin-lookup").hidden = !sampleFn || !AS.isinCandidates(state).length;
+}
+const ISIN_ERRORS = {
+  not_granted: "Je gaf geen toestemming om Claude te gebruiken op deze pagina.",
+  rate_limited: "Even te veel vragen na elkaar. Probeer het straks opnieuw.",
+  invalid_json: "Claude gaf geen bruikbaar antwoord. Probeer het opnieuw.",
+  cancelled: "Geannuleerd.",
+};
+let isinAbort = null;
+$("#btn-isin-lookup").addEventListener("click", async () => {
+  const items = AS.isinCandidates(state);
+  if (!sampleFn || !items.length) return;
+  isinRows = [];
+  $("#isin-table tbody").innerHTML = "";
+  $("#isin-apply").disabled = true;
+  $("#isin-status").textContent = `Claude zoekt de ISIN van ${items.length} ${items.length === 1 ? "effect" : "effecten"}… Dit kan een minuut duren.`;
+  $("#isin-dialog").showModal();
+  isinAbort = new AbortController();
+  try {
+    for (let i = 0; i < items.length; i += 40) { // in delen, zodat een lange lijst niet afgekapt wordt
+      const part = items.slice(i, i + 40);
+      const answer = await sampleFn.json(AS.isinPrompt(part), { modelTier: "complex", signal: isinAbort.signal });
+      isinRows.push(...AS.parseIsinAnswer(answer, part));
+      renderIsinRows();
+    }
+    const found = isinRows.filter(r => r.isin).length;
+    $("#isin-status").textContent = `${found} van ${isinRows.length} gevonden. Controleer ze voor je ze overneemt.`;
+  } catch (e) {
+    $("#isin-status").textContent = ISIN_ERRORS[e && e.code] || `Opzoeken mislukt${e && e.code ? ` (${e.code})` : ""}.`;
+  } finally { isinAbort = null; }
+});
+function renderIsinRows() {
+  $("#isin-table tbody").innerHTML = isinRows.map((r, i) => {
+    const exists = r.isin && state.assets[r.isin];
+    return `<tr data-r="${i}">
+      <td><input type="checkbox" name="take" ${r.isin && r.confidence !== "laag" ? "checked" : ""} ${r.isin ? "" : "disabled"} aria-label="Overnemen"></td>
+      <td><strong>${esc(r.name)}</strong><br><span class="small muted">${esc(r.key)}</span>
+        ${r.official_name ? `<br><span class="small">${esc(r.official_name)}${r.ticker ? ` · ${esc(r.ticker)}` : ""}</span>` : ""}</td>
+      <td><input name="isin" value="${esc(r.isin)}" class="key" placeholder="${esc(r.problem || "ISIN")}" aria-label="ISIN">
+        ${exists ? `<span class="hint">bestaat al: wordt samengevoegd</span>` : ""}</td>
+      <td>${r.isin ? `<span class="badge ${r.confidence === "hoog" ? "ok" : r.confidence === "laag" ? "need" : ""}">${esc(r.confidence)}</span>` : `<span class="muted small">${esc(r.problem)}</span>`}</td>
+      <td class="small" style="white-space:normal;min-width:180px">${esc(r.remark)}</td></tr>`;
+  }).join("");
+  $("#isin-apply").disabled = !isinRows.some(r => r.isin);
+}
+$("#isin-table").addEventListener("input", e => {
+  const tr = e.target.closest("tr[data-r]"); if (!tr || e.target.name !== "isin") return;
+  const v = AS.normKey(e.target.value), ok = AS.isinChecksumOk(v), box = $("[name=take]", tr);
+  box.disabled = !ok; if (!ok) box.checked = false;
+  $("#isin-apply").disabled = !$$("#isin-table [name=take]").some(b => !b.disabled);
+});
+$("#isin-cancel").addEventListener("click", () => { isinAbort?.abort(); $("#isin-dialog").close(); });
+$("#isin-apply").addEventListener("click", async () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const picks = $$("#isin-table tbody tr[data-r]").map(tr => ({ r: isinRows[Number(tr.dataset.r)], isin: AS.normKey($("[name=isin]", tr).value), take: $("[name=take]", tr).checked }))
+    .filter(x => x.take && AS.isinChecksumOk(x.isin) && state.assets[x.r.key] && x.r.key !== x.isin);
+  const merges = picks.filter(x => state.assets[x.isin]);
+  if (merges.length && !(await confirmDialog(`${merges.map(x => `${x.r.name} → ${x.isin}`).join(", ")}: deze ISIN bestaat al. Samenvoegen?`))) return;
+  for (const { r, isin } of picks) {
+    AS.renameAsset(state, r.key, isin);
+    const a = state.assets[isin];
+    a.isin_source = `voorgesteld door Claude, bevestigd op ${today}`;
+    if (!a.name && r.official_name) a.name = r.official_name;
+  }
+  $("#isin-dialog").close();
+  commit();
+  const n = picks.length;
+  toast(n ? `${n} ${n === 1 ? "ISIN" : "ISIN's"} overgenomen; een volgende import gebruikt ook deze codes` : "Niets overgenomen");
 });
 
 // ================================================================ instellingen
