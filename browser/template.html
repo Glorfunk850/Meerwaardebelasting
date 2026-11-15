@@ -241,9 +241,10 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     </div>
     <div class="panel">
       <h3>Back-up</h3>
-      <p class="hint">Bewaar af en toe een back-up buiten deze pagina. Herstellen vervangt alle huidige gegevens. De back-up bevat de namen van je bewijsstukken, niet de bestanden zelf: bewaar die ook apart.</p>
+      <p class="hint">Bewaar af en toe een back-up buiten deze pagina. Herstellen vervangt alle huidige gegevens. De gewone back-up bevat enkel de namen van je bewijsstukken; <em>Back-up met bewijsstukken</em> zet ook de bestanden zelf erin (groter bestand). Herstellen zet de bestanden terug.</p>
       <div class="row">
         <button class="btn" id="btn-export">Back-up downloaden</button>
+        <button class="btn" id="btn-export-full">Back-up met bewijsstukken</button>
         <button class="btn ghost" id="btn-copy-backup">Back-up kopiëren</button>
         <label class="btn ghost">Back-up herstellen uit bestand<input type="file" id="import-file" accept=".json,application/json"></label>
       </div>

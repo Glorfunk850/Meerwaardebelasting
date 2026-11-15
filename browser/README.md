@@ -53,7 +53,11 @@ installatiecode niets.
 Bij elke transactie kun je bestanden toevoegen (PDF, JPG, PNG, WEBP, GIF, TXT, CSV; max. 20 MB per bestand), bv. het
 borderel of de afrekening van de bank. Op claude.ai staan ze bij de pagina in je Claude-account (capability `assets`,
 even privé als de pagina); elders in de browser (IndexedDB). De transactie bewaart enkel naam, type, grootte en
-verwijzing, dus de back-up bevat de bestanden zelf niet. Bestanden van de ene plaats zijn op de andere niet te openen.
+verwijzing. De gewone back-up bevat dus enkel die gegevens; *Back-up met bewijsstukken* (Instellingen) zet ook de
+bestanden zelf erin (base64 in het veld `proof_files`, ca. een derde groter dan de bestanden samen). Bij herstellen worden
+die bestanden opnieuw opgeslagen op de plaats waar je herstelt (en niet dubbel als ze er al staan); `proof_files` komt
+nooit in de bewaarde toestand. Zo verhuis je bewijsstukken ook tussen claude.ai en de app-versie. Zonder zo'n back-up zijn
+bestanden van de ene plaats op de andere niet te openen.
 
 De filter *Bewijs ontbreekt* toont verwervingen van activa die nog in bezit zijn en verkopen die belastbaar zijn
 (vanaf 2026) of van activa die nog in bezit zijn, zonder bewijsstuk.

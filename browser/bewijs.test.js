@@ -46,3 +46,23 @@ test("verwijderde en gebruikte bijlagen", () => {
   assert.deepStrictEqual(B.removedAttachments(undefined, after), []);
   assert.deepStrictEqual([...B.usedIds([{ attachments: [{ id: "x" }] }, {}])], ["x"]);
 });
+
+test("base64 heen en terug, ook groot en binair", () => {
+  const bytes = new Uint8Array(100000).map((_, i) => (i * 37) % 256);
+  const b64 = B.toBase64(bytes);
+  assert.strictEqual(b64, Buffer.from(bytes).toString("base64"));
+  assert.deepStrictEqual(B.fromBase64(b64), bytes);
+});
+
+test("back-up: bijlagen verzamelen, splitsen en herkoppelen", () => {
+  const tx = [{ attachments: [{ id: "a", name: "x.pdf" }, { id: "b", name: "y.png" }] }, { attachments: [{ id: "a", name: "x.pdf" }] }, {}];
+  assert.deepStrictEqual(B.allAttachments(tx).map(a => a.id), ["a", "b"]);
+  const { state, files } = B.splitBackup({ transactions: tx, proof_files: { a: { data: "QQ==" } } });
+  assert.strictEqual(state.proof_files, undefined);
+  assert.deepStrictEqual(Object.keys(files), ["a"]);
+  assert.deepStrictEqual(B.splitBackup({ transactions: [] }).files, {});
+  const n = B.remapAttachments(tx, new Map([["a", { id: "n1", store: "account" }]]));
+  assert.strictEqual(n, 2);
+  assert.deepStrictEqual(tx[0].attachments[0], { id: "n1", name: "x.pdf", store: "account" });
+  assert.strictEqual(tx[0].attachments[1].id, "b");
+});

@@ -64,6 +64,40 @@
     return new Set(transactions.flatMap(t => (t.attachments || []).map(a => a.id)));
   }
 
-  const api = { MAX_BYTES, ACCEPT, contentType, checkFile, sizeLabel, missingProof, removedAttachments, usedIds };
+  // ------------------------------------------------------------ back-up met bestanden
+  function toBase64(bytes) {
+    let s = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(s);
+  }
+  function fromBase64(b64) {
+    const s = atob(b64), out = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+    return out;
+  }
+  /** Unieke bijlagen (per id) uit de transacties, in volgorde van voorkomen. */
+  function allAttachments(transactions) {
+    const seen = new Map();
+    for (const t of transactions) for (const a of t.attachments || []) if (!seen.has(a.id)) seen.set(a.id, a);
+    return [...seen.values()];
+  }
+  /** Verwijzingen vervangen na herstel: map oude id -> nieuwe bijlage (id, store, …). Geeft het aantal aanpassingen. */
+  function remapAttachments(transactions, map) {
+    let n = 0;
+    for (const t of transactions) {
+      if (!t.attachments) continue;
+      t.attachments = t.attachments.map(a => { const m = map.get(a.id); if (!m) return a; n++; return { ...a, ...m }; });
+    }
+    return n;
+  }
+  /** Back-up splitsen in toestand en bestanden (de bestanden horen nooit in de opgeslagen toestand). */
+  function splitBackup(obj) {
+    if (!obj || typeof obj !== "object") return { state: obj, files: {} };
+    const { proof_files, ...state } = obj;
+    return { state, files: proof_files && typeof proof_files === "object" ? proof_files : {} };
+  }
+
+  const api = { MAX_BYTES, ACCEPT, contentType, checkFile, sizeLabel, missingProof, removedAttachments, usedIds,
+    toBase64, fromBase64, allAttachments, remapAttachments, splitBackup };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.BEWIJS = api;
 })(typeof window !== "undefined" ? window : globalThis);

@@ -497,8 +497,8 @@ $("#f-asset").addEventListener("input", renderTransactions);
 
 // ================================================================ bewijsstukken
 // claude.ai: bestanden bij de pagina zelf (capability "assets", zelfde privacy als de pagina).
-// Elders (GitHub Pages, lokaal): IndexedDB in deze browser. De back-up bevat enkel naam en verwijzing.
-const proofs = { assets: null, ready: false, onClaude: !!window.claude };
+// Elders (GitHub Pages, lokaal): IndexedDB in deze browser. De gewone back-up bevat enkel naam en verwijzing; "Back-up met bewijsstukken" ook de bestanden.
+const proofs = { assets: null, ready: false, onClaude: !!window.claude, init: null };
 const proofDraft = { list: [], before: [], saved: false, session: 0, uploading: 0, urls: [] };
 
 async function initProofs() {
@@ -603,9 +603,9 @@ function renderProofs() {
   $("#proof-add").hidden = !kind;
   $("#proof-file").accept = window.BEWIJS.ACCEPT;
   $("#proof-hint").textContent = kind === "account"
-    ? "Bv. het borderel of de afrekening van je bank (PDF of foto, max. 20 MB). Privé bewaard bij deze pagina in je Claude-account; niet in de back-up."
+    ? "Bv. het borderel of de afrekening van je bank (PDF of foto, max. 20 MB). Privé bewaard bij deze pagina in je Claude-account; mee in de ‘Back-up met bewijsstukken’."
     : kind === "browser"
-      ? "Bv. het borderel of de afrekening van je bank (PDF of foto, max. 20 MB). Bewaard in deze browser, niet in de back-up: bewaar het origineel ook zelf."
+      ? "Bv. het borderel of de afrekening van je bank (PDF of foto, max. 20 MB). Bewaard in deze browser; mee in de ‘Back-up met bewijsstukken’."
       : !proofs.ready ? "Opslag voor bestanden wordt geladen…"
         : "Bestanden toevoegen kan hier niet: de pagina heeft geen toestemming voor bestanden (menu van de pagina → Toestemmingen).";
   const list = $("#proof-list");
@@ -819,6 +819,27 @@ async function offerDownload(filename, text, fallbackLabel) { // text: tekst of 
   catch { showTextDialog(fallbackLabel, text); }
 }
 $("#btn-export").addEventListener("click", () => offerDownload(`meerwaarde-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(state, null, 1), "Back-up"));
+$("#btn-export-full").addEventListener("click", async e => {
+  const btn = e.currentTarget, label = btn.textContent;
+  await proofs.init;
+  const list = window.BEWIJS.allAttachments(state.transactions), files = {};
+  let missing = 0;
+  btn.disabled = true;
+  try {
+    for (const [i, a] of list.entries()) {
+      btn.textContent = `Bewijsstukken verzamelen… ${i + 1}/${list.length}`;
+      if (!proofReachable(a)) { missing++; continue; }
+      try {
+        const b = await proofBlob(a);
+        files[a.id] = { name: a.name, type: a.type || b.type, data: window.BEWIJS.toBase64(new Uint8Array(await b.arrayBuffer())) };
+      } catch { missing++; }
+    }
+    const text = JSON.stringify({ ...state, proof_files: files });
+    await offerDownload(`meerwaarde-backup-met-bewijzen-${new Date().toISOString().slice(0, 10)}.json`, new Blob([text], { type: "application/json" }), "Back-up");
+    if (missing) toast(`${missing} ${missing === 1 ? "bewijsstuk zat" : "bewijsstukken zaten"} niet in de back-up: ${missing === 1 ? "het staat" : "ze staan"} ${proofs.onClaude ? "in een browser buiten claude.ai" : "op de claude.ai-pagina"} of ${missing === 1 ? "is" : "zijn"} niet meer te vinden.`, true);
+  } catch (err) { toast("Back-up maken mislukt: " + (err.message || err), true); }
+  finally { btn.disabled = false; btn.textContent = label; }
+});
 $("#btn-copy-backup").addEventListener("click", async () => {
   try { await navigator.clipboard.writeText(JSON.stringify(state)); toast("Back-up gekopieerd naar het klembord"); }
   catch { showTextDialog("Back-up", JSON.stringify(state)); }
@@ -832,17 +853,52 @@ $("#import-file").addEventListener("change", async e => {
 });
 $("#btn-import-paste").addEventListener("click", () => importBackup($("#import-text").value));
 async function importBackup(text) {
-  let s;
-  try { s = JSON.parse(text); } catch { return toast("Dit is geen geldige back-up (JSON).", true); }
+  let parsed;
+  try { parsed = JSON.parse(text); } catch { return toast("Dit is geen geldige back-up (JSON).", true); }
+  const { state: s, files } = window.BEWIJS.splitBackup(parsed);
   if (!validState(s)) return toast("Dit bestand heeft niet de vorm van een back-up van deze tool.", true);
-  if (!(await confirmDialog(`Back-up met ${s.transactions.length} transacties herstellen? Je huidige gegevens worden vervangen.`))) return;
+  const nf = Object.keys(files).length;
+  if (!(await confirmDialog(`Back-up met ${s.transactions.length} transacties${nf ? ` en ${nf} bewijsstukken` : ""} herstellen? Je huidige gegevens worden vervangen.`))) return;
+  const previous = window.BEWIJS.allAttachments(state.transactions);
   state = s; state.nextId = Math.max(state.nextId || 1, ...state.transactions.map(t => t.id + 1));
   migrateToNames();
   $("#import-text").value = ""; commit(); toast("Back-up hersteld");
+  if (nf) await restoreProofFiles(files, previous);
+}
+/** Bestanden uit een back-up terugzetten; wat er al staat (zelfde pagina of browser) wordt niet dubbel opgeslagen. */
+async function restoreProofFiles(files, previous = []) {
+  await proofs.init;
+  const kind = proofStoreKind();
+  if (!kind) return toast("De bewijsstukken uit de back-up konden niet teruggezet worden: deze pagina heeft geen toestemming voor bestanden.", true);
+  const todo = window.BEWIJS.allAttachments(state.transactions).filter(a => files[a.id]);
+  const map = new Map();
+  let kept = 0, failed = 0;
+  for (const [i, a] of todo.entries()) {
+    toast(`Bewijsstukken terugzetten… ${i + 1}/${todo.length}`);
+    if (a.store === kind && await proofExists(a)) { kept++; continue; }
+    try {
+      const f = files[a.id], type = window.BEWIJS.contentType(f.name || a.name, f.type || a.type);
+      const bytes = window.BEWIJS.fromBase64(f.data);
+      // zelfde bestand stond er al (bv. dezelfde back-up opnieuw hersteld): hergebruiken in plaats van dubbel opslaan
+      const same = previous.find(p => p.store === kind && p.name === (f.name || a.name) && p.size === bytes.length);
+      if (same && await proofExists(same)) { map.set(a.id, { id: same.id, store: same.store, size: same.size, type: same.type }); continue; }
+      const file = new File([bytes], f.name || a.name, { type: type || "" });
+      const saved = await saveProofFile(file);
+      map.set(a.id, { id: saved.id, store: saved.store, size: saved.size, type: saved.type });
+    } catch { failed++; }
+  }
+  if (map.size) { window.BEWIJS.remapAttachments(state.transactions, map); commit(); }
+  toast(`${map.size + kept} van ${todo.length} bewijsstukken hersteld` + (failed ? `; ${failed} mislukt` : ""), failed > 0);
+}
+async function proofExists(a) {
+  try {
+    if (a.store === "account") return (await fetch("/_blob/" + a.id, { method: "HEAD" })).ok;
+    return !!(await idb.get(a.id));
+  } catch { return false; }
 }
 $("#btn-reset").addEventListener("click", async () => {
   const files = state.transactions.flatMap(t => t.attachments || []);
-  if (await confirmDialog("Alle gegevens wissen? Maak eerst een back-up als je ze wil bewaren." + (files.length ? ` Ook de ${files.length} bewijsstukken worden verwijderd (die zitten niet in de back-up).` : ""))) {
+  if (await confirmDialog("Alle gegevens wissen? Maak eerst een back-up als je ze wil bewaren." + (files.length ? ` Ook de ${files.length} bewijsstukken worden verwijderd (die zitten enkel in de back-up met bewijsstukken).` : ""))) {
     state = emptyState(); commit(); toast("Alle gegevens gewist");
     for (const a of files) deleteProofFile(a);
   }
@@ -1157,4 +1213,4 @@ function setupInstall() {
 setupInstall();
 
 initStorage();
-initProofs();
+proofs.init = initProofs();
