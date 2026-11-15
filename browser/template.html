@@ -190,7 +190,6 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
 
   <section id="tab-activa" class="tab">
     <div class="toolbar"><h2>Activa</h2>
-      <button class="btn ghost" id="btn-isin-lookup" hidden title="Laat Claude de ISIN voorstellen voor effecten die nog een naam als code hebben">ISIN's laten opzoeken</button>
       <label class="check" id="asset-closed-toggle" hidden><input type="checkbox" id="asset-show-closed">
         Toon ook activa die niet meer in portefeuille zitten (<span id="asset-closed-count">0</span>)</label></div>
     <p class="muted">Voor elk actief dat je vóór 1 januari 2026 verwierf, is de waarde per stuk op 31/12/2025 nodig
@@ -314,16 +313,6 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     <ul id="imp-warnings" class="small"></ul></details>
   <p class="hint">Aankopen van vóór 2026 worden gemarkeerd als "historische prijs bewijsbaar": de afrekeningen van je broker gelden als bewijs. Pas dat per transactie aan als nodig.</p>
   <div class="actions"><button class="btn ghost" id="imp-cancel">Annuleren</button><button class="btn primary" id="imp-confirm">Importeren</button></div>
-</div></dialog>
-
-<dialog id="isin-dialog" style="width:min(860px,96vw)"><div class="body">
-  <h3>Voorgestelde ISIN's</h3>
-  <p class="hint">Claude stelt deze codes voor op basis van de naam en de beurs uit de export. Het antwoord komt uit Claude's kennis,
-    niet uit een officiële databank: controleer elke code (bv. op de site van de beurs of je broker) voor je ze overneemt.
-    Codes met een fout controlecijfer zijn al weggelaten. Je kunt een code ook aanpassen.</p>
-  <p id="isin-status" class="muted small"></p>
-  <div class="table-wrap"><table id="isin-table"><thead><tr><th>Overnemen</th><th>Effect</th><th>Voorgestelde ISIN</th><th>Zekerheid</th><th>Opmerking</th></tr></thead><tbody></tbody></table></div>
-  <div class="actions"><button class="btn ghost" id="isin-cancel">Annuleren</button><button class="btn primary" id="isin-apply" disabled>Aangevinkte overnemen</button></div>
 </div></dialog>
 
 <dialog id="confirm-dialog" style="width:min(420px,92vw)"><div class="body">

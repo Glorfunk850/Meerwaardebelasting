@@ -66,27 +66,3 @@ test("aliassen worden toegepast op een nieuwe import", () => {
   assert.deepEqual(Object.keys(r.assets), ["FR0000000001", "ANDER (BR)"]);
   assert.equal(r.refHints.FR0000000001.value, "8.5");
 });
-
-test("controlecijfer van ISIN's", () => {
-  for (const ok of ["US0378331005", "BE0003565737", "NL0010273215", "IE00B4L5Y983"]) assert.equal(A.isinChecksumOk(ok), true, ok);
-  for (const bad of ["US0378331006", "BE0003565730", "XX", "VOORBEELD NV (PA)"]) assert.equal(A.isinChecksumOk(bad), false, bad);
-});
-
-test("kandidaten en controle van voorgestelde ISIN's", () => {
-  const s = { assets: { "VOORBEELD NV (PA)": { name: "VOORBEELD NV", currency: "EUR", ref_value_eur: "8.5" },
-    "ANDER (NY)": { name: "", currency: "USD" }, BE0003565737: { name: "Voorbeeld" }, AAPL: { name: "", currency: "USD" } } };
-  const items = A.isinCandidates(s);
-  assert.deepEqual(items.map(i => [i.key, i.name, i.exchange]),
-    [["VOORBEELD NV (PA)", "VOORBEELD NV", "PA"], ["ANDER (NY)", "ANDER", "NY"], ["AAPL", "AAPL", ""]]);
-  const prompt = A.isinPrompt(items);
-  assert.ok(prompt.includes("VOORBEELD NV (PA)") && !prompt.includes("8.5")); // geen bedragen naar Claude
-  const res = A.parseIsinAnswer([
-    { key: "VOORBEELD NV (PA)", isin: "us 0378331005", confidence: "hoog" },
-    { key: "ANDER (NY)", isin: "US0378331006", confidence: "middel" },
-    { key: "ONBEKEND", isin: "BE0003565737" },
-  ], items);
-  assert.equal(res[0].isin, "US0378331005"); assert.equal(res[0].problem, "");
-  assert.equal(res[1].isin, ""); assert.equal(res[1].problem, "controlecijfer klopt niet");
-  assert.equal(res[2].problem, "geen antwoord");
-  assert.equal(A.parseIsinAnswer({ results: [{ key: "AAPL", isin: null }] }, items)[2].problem, "niet gevonden");
-});
