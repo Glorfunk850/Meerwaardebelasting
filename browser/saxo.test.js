@@ -81,3 +81,28 @@ test("real export (optional)", { skip: !process.env.SAXO_FILE }, async () => {
   // kostprijs: |boekingsbedrag| ≈ verhandelde waarde in EUR ± kosten (afronding)
   for (const t of r.transactions) assert.ok(M.D(t.fx_per_eur).gt(0));
 });
+
+test("zonder ISIN: ISIN uit een andere regel, anders de ticker; import-id blijft gelijk", () => {
+  const sh = sheets();
+  const withSym = (r, sym) => { r[H.indexOf("Instrumentsymbool")] = sym; return r; };
+  sh.Transacties.push(
+    withSym(row({ date: "2026-02-02", id: "T7", action: "Koop 3 @ 40.00 EUR", amount: -122.00, costs: -2, name: "Voorbeeld ETF Acc", isin: null, qty: 3, price: 40 }), "VETF:xams"),
+    withSym(row({ date: "2026-01-02", id: "T6", action: "Koop 2 @ 40.00 EUR", amount: -82.00, costs: -2, name: "Voorbeeld ETF Acc", isin: "IE0000000009", qty: 2, price: 40 }), "VETF:xams"),
+    withSym(row({ date: "2026-01-03", id: "T8", action: "Koop 1 @ 9.00 EUR", amount: -11.00, costs: -2, name: "Zonder Code ETF", isin: null, qty: 1, price: 9 }), "ZCE:xetr"),
+    row({ date: "2026-01-04", id: "T9", action: "Koop 1 @ 9.00 EUR", amount: -11.00, costs: -2, name: "Helemaal Niets NV", isin: null, qty: 1, price: 9 }));
+  const r = S.parseSaxoSheets(sh);
+  const by = n => r.transactions.filter(t => t.note.startsWith(n));
+  assert.deepEqual(by("Voorbeeld ETF").map(t => t.asset), ["IE0000000009", "IE0000000009"]);
+  assert.equal(by("Zonder Code")[0].asset, "ZCE");
+  assert.equal(r.assets.ZCE.name, "Zonder Code ETF");
+  assert.equal(by("Helemaal Niets")[0].asset, "HELEMAAL NIETS NV");
+  assert.equal(S.tickerOf("EMIM:xams"), "EMIM");
+  // vroeger opgeslagen onder de naam -> plan om naar de nieuwe code te verhuizen; ISIN's blijven ongemoeid
+  const old = r.transactions.map(t => ({ ...t, asset: t.note.startsWith("Zonder Code") ? "ZONDER CODE ETF" : t.note.startsWith("Voorbeeld ETF") ? "VOORBEELD ETF ACC" : t.asset }));
+  const plan = S.keyMigrations(old, r.transactions);
+  assert.deepEqual([...plan].sort(), [["VOORBEELD ETF ACC", "IE0000000009"], ["ZONDER CODE ETF", "ZCE"]]);
+  assert.equal(S.keyMigrations(r.transactions, r.transactions).size, 0);
+  // import-id's veranderen niet door de nieuwe codes
+  const r2 = S.parseSaxoSheets(sh);
+  assert.deepEqual(r.transactions.map(t => t.import_id), r2.transactions.map(t => t.import_id));
+});

@@ -74,6 +74,15 @@
     const seen = new Map();
     let firstDate = null, lastDate = null;
     const lines = T.rows.filter(({ r }) => r.some(v => v != null && v !== "")).reverse(); // export is aflopend
+    // regels zonder ISIN: ISIN van een andere regel met hetzelfde instrument (naam of symbool) gebruiken
+    const isinByName = new Map(), isinBySymbol = new Map();
+    const instrName = r => { const raw = String(r[c.instr] ?? "").trim(), tag = delistedTag(raw); return norm(tag ? tag.name : raw); };
+    for (const { r } of lines) {
+      const isin = String(r[c.isin] ?? "").trim().toUpperCase(), sym = norm(r[c.symbol]);
+      if (!isin) continue;
+      if (instrName(r)) isinByName.set(instrName(r), isin);
+      if (sym) isinBySymbol.set(sym, isin);
+    }
     for (const { r, n } of lines) {
       const src = `${fileName}:${n}`;
       const type = norm(r[c.type]);
@@ -81,7 +90,10 @@
       if (!date) { warnings.push(`${src}: geen geldige datum, overgeslagen.`); continue; }
       if (type && type !== "transactie") { skipped[`Type '${r[c.type]}'`] = (skipped[`Type '${r[c.type]}'`] || 0) + 1; continue; }
       const oc = norm(r[c.openClose]);
-      const isin = String(r[c.isin] ?? "").trim().toUpperCase();
+      const ownIsin = String(r[c.isin] ?? "").trim().toUpperCase();
+      const symbol = String(r[c.symbol] ?? "").trim();
+      const isin = ownIsin || isinByName.get(instrName(r)) || (symbol && isinBySymbol.get(norm(symbol))) || "";
+      const ticker = tickerOf(symbol);
       const rawName = String(r[c.instr] ?? "").trim();
       const tag = delistedTag(rawName);
       const name = tag ? tag.name : rawName;
@@ -92,7 +104,7 @@
       }
       const qtyRaw = num(r[c.qty]), price = num(r[c.price]);
       if (!qtyRaw || qtyRaw.isZero() || price == null) { warnings.push(`${src}: aantal of prijs ontbreekt (${name}), overgeslagen.`); continue; }
-      if (!isin) warnings.push(`${src}: geen ISIN voor ${name}; de naam wordt gebruikt als sleutel.`);
+      if (!isin) warnings.push(`${src}: geen ISIN voor ${name}; ${ticker ? `de ticker ${ticker}` : "de naam"} wordt gebruikt als code.`);
       const isSell = qtyRaw.lt(0) || oc === "to close" && /verkoop/i.test(String(r[c.action]));
       const qty = abs(qtyRaw);
       const ccy = String(r[c.ccy] || "EUR").trim().toUpperCase() || "EUR";
@@ -106,8 +118,9 @@
       const txid = String(r[c.txid] ?? "").trim();
       const taxEur = Dmin(taxesById.get(txid) || ZERO, costsEur);
       const toCcy = eurAmt => (ccy === "EUR" ? eurAmt : eurAmt.mul(fx)).round(2);
-      const asset = isin || name.toUpperCase();
-      const base = `saxo|${txid || ""}|${date}|${asset}|${qtyRaw}|${price}`;
+      const asset = isin || ticker || name.toUpperCase();
+      // import-id zoals vroeger (met ISIN of naam), zodat een herimport dezelfde transacties herkent
+      const base = `saxo|${txid || ""}|${date}|${ownIsin || name.toUpperCase()}|${qtyRaw}|${price}`;
       const k = (seen.get(base) || 0) + 1; seen.set(base, k);
       const t = {
         type: isSell ? "SELL" : "BUY", trade_date: date, asset, quantity: qty.toString(), price: price.toString(), currency: ccy,
@@ -119,7 +132,7 @@
       const pl = num(r[c.pl]);
       if (isSell && pl != null) t.saxo_result = pl.toString();
       out.push(t);
-      assets[asset] ??= { currency: ccy, name, symbol: String(r[c.symbol] || "").trim(), kind: String(r[c.kind] || "").trim() };
+      assets[asset] ??= { currency: ccy, name, symbol, kind: String(r[c.kind] || "").trim() };
       if (tag) delistInfo.set(asset, { date: tag.date, name });
       firstDate = !firstDate || date < firstDate ? date : firstDate;
       lastDate = !lastDate || date > lastDate ? date : lastDate;
@@ -145,12 +158,31 @@
     return { source: "saxo", transactions: out, skipped, warnings, refHints: {}, assets, positions, delistings, fileName, rows: lines.length, period: [firstDate, lastDate] };
   }
   const Dmin = (a, b) => (a.lte(b) ? a : b);
+  /** Saxo-symbool "EMIM:xams" -> ticker "EMIM" */
+  const tickerOf = sym => String(sym || "").split(":")[0].trim().toUpperCase();
+  const isIsin = k => /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(String(k || ""));
+
+  /**
+   * Codes van eerder geïmporteerde transacties bijwerken: dezelfde transactie (zelfde import-id) die
+   * vroeger onder de naam stond, staat nu onder de ISIN of ticker. Een ISIN wordt nooit vervangen.
+   * -> Map oude code -> nieuwe code
+   */
+  function keyMigrations(existing, incoming) {
+    const byId = new Map(existing.filter(t => t.import_id).map(t => [t.import_id, t]));
+    const plan = new Map();
+    for (const t of incoming) {
+      const old = byId.get(t.import_id);
+      if (!old || old.asset === t.asset || isIsin(old.asset)) continue;
+      if (!plan.has(old.asset) || isIsin(t.asset)) plan.set(old.asset, t.asset);
+    }
+    return plan;
+  }
 
   async function parseSaxoFile(buf, opts) {
     const sheets = await X.readXlsx(buf);
     return parseSaxoSheets(sheets, opts);
   }
 
-  const api = { parseSaxoSheets, parseSaxoFile, delistedTag };
+  const api = { parseSaxoSheets, parseSaxoFile, delistedTag, tickerOf, keyMigrations };
   if (node) module.exports = api; else root.SAXO = api;
 })(typeof window !== "undefined" ? window : globalThis);

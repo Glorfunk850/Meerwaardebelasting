@@ -667,6 +667,7 @@ $("#import-bolero").addEventListener("change", async e => {
       } else throw new Error("Bestand niet herkend. Gebruik de Bolero-export 'Cashbewegingen' (CSV) of de Saxo-export 'Trades' (Excel).");
     }
     r.source ??= "bolero";
+    r.keyMoves = window.SAXO.keyMigrations(state.transactions, r.transactions);
     pendingImport = r;
     openImportDialog(r);
   } catch (err) { toast(err.message, true); }
@@ -692,7 +693,8 @@ function openImportDialog(r) {
   $("#imp-skipped").innerHTML = Object.entries(r.skipped).map(([k, v]) => `<li>${esc(k)}: ${v}</li>`).join("");
   $("#imp-owner").value = DEFAULT_OWNER;
   $("#imp-positions tbody").innerHTML = r.positions.map((p, i) => {
-    const cur = state.assets[p.asset]?.ref_value_eur;
+    const oldKey = [...(r.keyMoves || [])].find(([, to]) => to === p.asset)?.[0];
+    const cur = state.assets[p.asset]?.ref_value_eur ?? (oldKey ? state.assets[oldKey]?.ref_value_eur : undefined);
     const val = cur ?? p.refHint?.value ?? "";
     return `<tr data-i="${i}" class="${p.suspicious ? "suspicious" : ""}">
       <td><input type="checkbox" name="keep" ${p.suspicious ? "" : "checked"} aria-label="Nog in bezit"></td>
@@ -752,6 +754,7 @@ $("#imp-confirm").addEventListener("click", () => {
       return { d, add: $("[name=add]", tr).checked, mode,
         price: mode === "UITKOOP" && $("[name=add]", tr).checked ? dec($("[name=price]", tr).value, `uitkoopprijs voor ${d.name}`, { required: true, nonNegative: true }) : null };
     });
+    const moved = moveAssetKeys(r.keyMoves);
     const existing = new Set(state.transactions.map(t => t.import_id).filter(Boolean));
     let added = 0;
     for (const t of r.transactions) {
@@ -800,9 +803,31 @@ $("#imp-confirm").addEventListener("click", () => {
     const missing = [...need.keys()].filter(a => needsRef(a) && !(state.assets[a]?.ref_value_eur));
     $("#import-dialog").close(); pendingImport = null;
     commit();
-    toast(`${added} transacties geïmporteerd` + (missing.length ? `. Vul nog de waarde op 31/12/2025 in bij Activa voor: ${missing.map(a => state.assets[a]?.name || a).join(", ")}` : ""), missing.length > 0);
+    toast(`${added} transacties geïmporteerd` + (moved ? `; ${moved} ${moved === 1 ? "effect staat" : "effecten staan"} nu onder ISIN/ticker` : "") + (missing.length ? `. Vul nog de waarde op 31/12/2025 in bij Activa voor: ${missing.map(a => state.assets[a]?.name || a).join(", ")}` : ""), missing.length > 0);
   } catch (err) { toast(err.message, true); }
 });
+
+/** Oude code -> nieuwe code in transacties en activa (Saxo-effecten die vroeger onder de naam stonden). */
+function moveAssetKeys(plan) {
+  let n = 0;
+  for (const [from, to] of plan || []) {
+    for (const t of state.transactions) {
+      if (t.asset === from) t.asset = to;
+      if (t.import_id === `corr:${t.owner}:${from}`) t.import_id = `corr:${t.owner}:${to}`;
+      else if (typeof t.import_id === "string" && t.import_id.startsWith(`delist:${t.owner}:${from}:`))
+        t.import_id = `delist:${t.owner}:${to}:` + t.import_id.slice(`delist:${t.owner}:${from}:`.length);
+    }
+    const src = state.assets[from], dst = state.assets[to];
+    if (src) {
+      const merged = { ...src };
+      if (dst) for (const [k, v] of Object.entries(dst)) if (v != null && v !== "") merged[k] = v;
+      state.assets[to] = merged;
+      delete state.assets[from];
+    }
+    n++;
+  }
+  return n;
+}
 
 // voorbeeld
 function loadExample() {
