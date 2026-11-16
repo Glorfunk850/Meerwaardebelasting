@@ -16,6 +16,7 @@ De versie die op je claude.ai-link draait. Alles werkt in de browser; er is geen
 | `saxo.js` | Importer voor de Saxo-export "Transacties" (standaard, Excel) en de oudere export "Trades" (Excel of CSV) |
 | `xlsx.js` | Minimale Excel-lezer zonder externe bibliotheek |
 | `bewijs.js` | Bewijsstukken bij transacties: toegelaten bestandstypes, welke transacties nog een bewijs missen |
+| `pdf.js` | Rapport als PDF (minimale PDF-generator zonder externe bibliotheek, Helvetica met WinAnsi-tekens) |
 | `build.py` | Voegt alles samen tot `index.html` |
 | `manifest.webmanifest`, `sw.js`, `icon*` | Installeerbare app (PWA) op GitHub Pages; niet gebruikt op claude.ai |
 | `*.test.js` | Tests (Node 18+) |
@@ -28,6 +29,7 @@ node --test engine.test.js       # rekenkern
 node --test bolero.test.js       # Bolero-importer (synthetisch bestand)
 node --test saxo.test.js         # Saxo-importer (synthetisch bestand)
 node --test bewijs.test.js       # bewijsstukken
+node --test pdf.test.js          # PDF-generator
 
 # optioneel tegen je eigen exports:
 BOLERO_FILE=pad/naar/cashmovements.xlsx node --test bolero.test.js   # of .csv
@@ -83,3 +85,10 @@ De filter *Bewijs ontbreekt* toont verwervingen van activa die nog in bezit zijn
 - Ingehouden meerwaardebelasting: Bolero (kolom bij elke verkoop) en Saxo (boekingen "Meerwaardebelasting" in `Bookings`)
   worden per jaar en per broker opgeteld bij *Ingehouden door broker*. Een zelf ingevuld bedrag blijft staan; een export
   verhoogt het bedrag van een broker enkel (een export die maar een deel van het jaar dekt, verlaagt het niet).
+
+## Rapport als PDF
+
+Op het tabblad Rapport maakt *PDF-rapport* een A4-document met het overzicht per jaar (zoals de kaarten), elke verkoop
+met de loten (aankoopdatum, aantal, opbrengst, basis en waarop die steunt, resultaat, opmerking), de gebruikte waarde op
+31/12/2025 en de bron, waarschuwingen, de vergelijking met Bolero, gebeurtenissen zonder belastbaar moment, de fiscale
+parameters en de ingehouden bedragen. Het bestand wordt in de browser gemaakt (`pdf.js`), zonder externe dienst.

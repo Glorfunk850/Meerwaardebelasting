@@ -388,14 +388,18 @@ function boleroBadge(s) {
   return same ? `<span class="badge ok" title="Zelfde resultaat als Bolero">= Bolero</span>`
               : `<span class="badge need" title="Wijkt af van Bolero">≠ Bolero</span>`;
 }
-function boleroCheck(s) {
+function boleroCheckInfo(s) {
   const t = txOfSale(s);
-  if (!t || t.bolero_result == null) return "";
+  if (!t || t.bolero_result == null) return null;
   const b = D(t.bolero_result), diff = s.result_eur.sub(b).round(2);
-  if (diff.isZero()) return `<div class="alert ok small">Zelfde resultaat als Bolero berekende (${eur(b.toFixed(2))}).</div>`;
-  return `<div class="alert warn small">Bolero berekende ${eur(b.toFixed(2))}, deze tool ${eur(s.result_eur.toFixed(2))} (verschil ${eur(diff.toFixed(2))}).
-    Mogelijke oorzaken: een andere waarde op 31/12/2025, een hogere historische prijs die je zelf inroept (Bolero gebruikt die niet),
-    FIFO over meerdere brokers, of een ontbrekende transactie.</div>`;
+  if (diff.isZero()) return { same: true, text: `Zelfde resultaat als Bolero berekende (${eur(b.toFixed(2))}).` };
+  return { same: false, text: `Bolero berekende ${eur(b.toFixed(2))}, deze tool ${eur(s.result_eur.toFixed(2))} (verschil ${eur(diff.toFixed(2))}). ` +
+    "Mogelijke oorzaken: een andere waarde op 31/12/2025, een hogere historische prijs die je zelf inroept (Bolero gebruikt die niet), " +
+    "FIFO over meerdere brokers, of een ontbrekende transactie." };
+}
+function boleroCheck(s) {
+  const c = boleroCheckInfo(s);
+  return c ? `<div class="alert ${c.same ? "ok" : "warn"} small">${esc(c.text)}</div>` : "";
 }
 
 function salesCsv() {
@@ -408,6 +412,105 @@ function salesCsv() {
       s.reynders_deduction_eur.neg().toFixed(2), "Aftrek belastbare interestcomponent"]);
   }
   return rows.map(r => r.map(c => /[;"\n]/.test(String(c)) ? `"${String(c).replace(/"/g, '""')}"` : c).join(";")).join("\r\n");
+}
+
+/** Volledig rapport als PDF: overzicht per jaar, elke verkoop met de loten, gebeurtenissen en de gebruikte parameters. */
+function reportPdf(now = new Date()) {
+  const r = runReport();
+  const method = state.settings.historic_method, other = method === "FIFO" ? "GEMIDDELD" : "FIFO";
+  const methodLabel = m => m === "FIFO" ? "per lot (FIFO)" : "gemiddelde";
+  let alt = null, proven = null;
+  try { alt = runReport(other); } catch {}
+  try { proven = runReportAllProven(); } catch {}
+  const today = now.toLocaleDateString("nl-BE", { day: "numeric", month: "long", year: "numeric" });
+  const m2 = v => eur(v.toFixed(2));
+  const color = v => v.gt(0) ? "pos" : v.lt(0) ? "neg" : null;
+  const blocks = [
+    { type: "h1", text: "Meerwaardebelasting – rapport" },
+    { type: "p", color: "muted", text: `Opgemaakt op ${today} · België, algemeen regime (wet van 6 april 2026)` },
+    { type: "p", color: "muted", text: `Historische prijs: ${methodLabel(method)} · FIFO ${state.settings.fifo_scope === "BROKER" ? "per broker" : "over alle brokers"}` },
+    { type: "note", tone: "warn", text: "Rekenhulp, geen fiscaal advies. Controleer met de FOD Financiën of een adviseur." },
+    { type: "h2", text: "Overzicht per jaar" },
+  ];
+  if (!r.years.length) blocks.push({ type: "p", color: "muted", text: "Nog geen verkopen of inhoudingen." });
+  for (const y of r.years) {
+    const a = alt && alt.years.find(x => x.owner === y.owner && x.year === y.year);
+    const p = proven && proven.years.find(x => x.owner === y.owner && x.year === y.year);
+    const refund = y.refund_eur;
+    const rows = [
+      { label: "Meerwaarden", value: m2(y.gains_eur), color: "pos" },
+      { label: "Minderwaarden", value: m2(y.losses_eur), color: "neg" },
+      { label: "Netto meerwaarde", value: m2(y.net_eur), bold: true },
+    ];
+    if (y.lost_losses_eur.lt(0)) rows.push({ label: "Niet verrekenbaar verlies", value: m2(y.lost_losses_eur), color: "muted" });
+    rows.push({ label: "Vrijstelling beschikbaar", value: m2(y.exemption_available_eur), sep: true },
+      { label: "· uit overdracht", value: m2(y.carry_used_eur) }, { label: "· uit basis", value: m2(y.base_used_eur) },
+      { label: "Nieuwe overdracht", value: m2(y.carry_generated_eur) },
+      { label: "Belastbaar", value: m2(y.taxable_eur), bold: true, sep: true }, { label: "Belasting", value: m2(y.tax_eur), bold: true },
+      { label: "Ingehouden door broker", value: m2(y.withheld_eur) });
+    if (!y.dividends_eur.isZero()) rows.push({ label: "Dividenden (info)", value: m2(y.dividends_eur), color: "muted" });
+    rows.push({ label: refund.gte(0) ? "Terug te vorderen" : "Bij te betalen", value: eur(Math.abs(Number(refund.toFixed(2)))),
+      bold: true, sep: true, color: color(refund) });
+    blocks.push({ type: "h3", text: `${y.year} · ${y.owner} · ${y.sale_count} ${y.sale_count === 1 ? "verkoop" : "verkopen"}` },
+      { type: "kv", rows });
+    const carries = Object.entries(y.carry_detail).map(([k, v]) => `${k}: ${m2(v)}`).join(", ");
+    if (carries) blocks.push({ type: "p", color: "muted", size: 8.5, text: `Overdrachten beschikbaar na ${y.year}: ${carries}` });
+    if (a && !(a.net_eur.eq(y.net_eur) && a.tax_eur.eq(y.tax_eur)))
+      blocks.push({ type: "note", tone: "warn", text: `Met de methode ${methodLabel(other)} zou de netto meerwaarde ${m2(a.net_eur)} zijn en de belasting ${m2(a.tax_eur)}.` });
+    if (p && p.tax_eur.lt(y.tax_eur))
+      blocks.push({ type: "note", tone: "warn", text: `Mogelijk voordeel: sommige aankopen van vóór 2026 hebben een hogere prijs dan de waarde op 31/12/2025 ` +
+        `maar zijn niet als bewijsbaar aangeduid. Met bewijs zou de belasting ${m2(p.tax_eur)} zijn i.p.v. ${m2(y.tax_eur)} ` +
+        `(${m2(y.tax_eur.sub(p.tax_eur))} minder). Bij opt-in houdt de broker in op de waarde van 31/12/2025; de historische prijs roep je zelf in via je aangifte.` });
+  }
+
+  blocks.push({ type: "h2", text: `Verkopen (${r.sales.length})` });
+  if (!r.sales.length) blocks.push({ type: "p", color: "muted", text: "Nog geen verkopen vanaf 2026." });
+  for (const s of r.sales) {
+    blocks.push({ type: "h3", text: `${s.trade_date} · ${assetLabel(s.asset)}${s.kind === "UITKOOP" ? " (uitkoop)" : ""} · resultaat ${m2(s.result_eur)}` });
+    const info = [`${num(s.quantity.toString())} st.`, s.owner, s.broker, `opbrengst ${m2(s.proceeds_eur)}`, `kosten ${m2(s.fees_eur)} (niet aftrekbaar)`];
+    if (!s.reynders_deduction_eur.isZero()) info.push(`Reynders-aftrek ${m2(s.reynders_deduction_eur)}`);
+    info.push(s.source);
+    blocks.push({ type: "p", color: "muted", size: 8.5, text: info.filter(Boolean).join(" · ") });
+    if (s.lines.some(l => l.acquired && l.acquired < "2026-01-01")) {
+      const a = state.assets[s.asset] || {};
+      const ref = a.ref_value_eur != null && a.ref_value_eur !== ""
+        ? `€ ${num(a.ref_value_eur)} per stuk${a.currency && a.currency.toUpperCase() !== "EUR" && a.ref_price ? ` (${num(a.ref_price)} ${a.currency.toUpperCase()})` : ""}${a.ref_source ? `, bron: ${a.ref_source}` : ""}`
+        : "niet ingevuld";
+      blocks.push({ type: "p", color: "muted", size: 8.5, text: `Waarde 31/12/2025: ${ref}` });
+    }
+    const chk = boleroCheckInfo(s);
+    if (chk) blocks.push({ type: "note", tone: chk.same ? "ok" : "warn", text: chk.text });
+    blocks.push({ type: "table", cols: [
+      { title: "Lot (aankoop)", width: 0.11 }, { title: "Aantal", width: 0.08, align: "right" },
+      { title: "Opbrengst", width: 0.13, align: "right" }, { title: "Basis", width: 0.12, align: "right" },
+      { title: "Basis volgens", width: 0.16 }, { title: "Resultaat", width: 0.12, align: "right" }, { title: "Opmerking", width: 0.28 }],
+      rows: s.lines.map(l => [l.acquired || "–", num(l.quantity.toString()), m2(l.proceeds_eur), m2(l.basis_eur),
+        BASIS_LABELS[l.basis_used] || l.basis_used, { text: m2(l.result_eur), color: color(l.result_eur) }, l.note || ""]) });
+    for (const w of s.warnings) blocks.push({ type: "note", tone: "warn", text: w });
+  }
+
+  const ev = r.events.filter(e => e.kind !== "UITKOOP");
+  if (ev.length) {
+    blocks.push({ type: "h2", text: "Gebeurtenissen zonder belastbaar moment" });
+    for (const e of ev) blocks.push({ type: "p", text: `${e.trade_date} · ${assetLabel(e.asset)} · ${DELIST_SHORT[e.kind]} · ${num(e.quantity_held.toString())} st. in bezit · ${e.owner}` },
+      { type: "p", color: "muted", size: 8.5, text: e.note });
+  }
+
+  const years = Object.entries(state.years).sort(([a], [b]) => a - b);
+  blocks.push({ type: "h2", text: "Gebruikte fiscale parameters" },
+    { type: "table", cols: [{ title: "Jaar", width: 0.08 }, { title: "Tarief", width: 0.09, align: "right" },
+      { title: "Basisvrijstelling", width: 0.15, align: "right" }, { title: "Overdraagbare schijf", width: 0.16, align: "right" },
+      { title: "Geldig (jaar)", width: 0.1, align: "right" }, { title: "Bron", width: 0.42 }],
+    rows: years.map(([y, c]) => [y, `${num(D(c.rate).mul(D(100)).toString())}%`, eur(c.base_exemption), eur(c.carry_slice),
+      String(c.carry_validity_years ?? ""), c.source || ""]) });
+  if (state.withheld.length)
+    blocks.push({ type: "h3", text: "Ingehouden door de broker" },
+      { type: "table", cols: [{ title: "Eigenaar", width: 0.3 }, { title: "Jaar", width: 0.15 }, { title: "Per broker", width: 0.35 }, { title: "Bedrag", width: 0.2, align: "right" }],
+        rows: state.withheld.slice().sort((a, b) => a.year - b.year || String(a.owner).localeCompare(b.owner))
+          .map(w => [w.owner, String(w.year), w.parts ? Object.entries(w.parts).map(([k, v]) => `${k}: ${eur(v)}`).join(", ") : "zelf ingevuld", eur(w.amount)]) });
+
+  return window.PDF.build({ title: "Meerwaardebelasting – rapport", footer: `Meerwaardebelasting – rapport · ${today} · rekenhulp, geen fiscaal advies`,
+    date: now.toISOString(), blocks });
 }
 
 // ================================================================ transacties
@@ -960,6 +1063,11 @@ $("#btn-copy-backup").addEventListener("click", async () => {
 });
 $("#btn-csv").addEventListener("click", () => {
   try { offerDownload("verkopen.csv", "﻿" + salesCsv(), "CSV"); } catch (e) { toast(e.message, true); }
+});
+$("#btn-pdf").addEventListener("click", () => {
+  let pdf;
+  try { pdf = reportPdf(); } catch (e) { return toast("PDF maken mislukt: " + e.message, true); }
+  offerDownload(`meerwaarde-rapport-${new Date().toISOString().slice(0, 10)}.pdf`, new Blob([pdf], { type: "application/pdf" }), "PDF-rapport");
 });
 $("#import-file").addEventListener("change", async e => {
   const file = e.target.files[0]; if (!file) return;
