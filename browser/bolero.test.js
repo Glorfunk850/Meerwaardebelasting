@@ -1,4 +1,4 @@
-// node --test bolero.test.js   (synthetisch bestand in Bolero-formaat; optioneel: BOLERO_FILE=pad voor een echte export)
+// node --test bolero.test.js   (synthetisch bestand in Bolero-formaat; optioneel: BOLERO_FILE=pad voor een echte export, CSV of Excel)
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("fs");
@@ -93,11 +93,63 @@ test("rejects other files", () => {
   assert.throws(() => B.parseBolero("a,b,c\n1,2,3"), /Datum transactie/);
 });
 
-test("real export (optional)", { skip: !process.env.BOLERO_FILE }, () => {
-  const r = B.parseBolero(fs.readFileSync(process.env.BOLERO_FILE, "utf8"));
+// Excel-export: dezelfde kolommen, maar datums als serienummer (12u) en bedragen als getal
+const serial = dmy => Date.UTC(+dmy.slice(6, 10), +dmy.slice(3, 5) - 1, +dmy.slice(0, 2)) / 864e5 + 25569 + 0.5;
+function sampleAsSheet() {
+  const rows = B.parseCsv(SAMPLE);
+  const h = rows.find(r => r.includes("Datum transactie"));
+  const numCols = ["Bedrag", "Aantal", "Prijs", "Roerende voorheffing (EUR)", "Winst/verlies", "Meerwaardebelasting"].map(k => h.indexOf(k));
+  const dateCols = [h.indexOf("Datum transactie"), h.indexOf("Valutadatum")];
+  return rows.map(r => r === h ? r : r.map((c, j) => c === "" ? null
+    : dateCols.includes(j) && /^\d\d\/\d\d\/\d{4}$/.test(c) ? serial(c)
+    : numCols.includes(j) && /^-?[\d.]+(,\d+)?$/.test(c) ? Number(c.replace(/\./g, "").replace(",", ".")) : c));
+}
+
+test("Belgische getalnotatie zoals in de CSV", () => {
+  assert.equal(B.beNum(1601.95, true), "1.601,95"); assert.equal(B.beNum(-1200, true), "-1.200,00");
+  assert.equal(B.beNum(5.21), "5,21"); assert.equal(B.beNum(310), "310"); assert.equal(B.beNum(-959.45), "-959,45");
+});
+
+test("Excel-export geeft dezelfde transacties als de CSV", () => {
+  const csv = B.parseBolero(SAMPLE, { owner: "ik", fileName: "s.csv" });
+  const xl = B.parseBoleroSheets({ Sheet0: sampleAsSheet() }, { owner: "ik", fileName: "s.xlsx" });
+  const strip = t => { const { import_id, import_source, ...rest } = t; return rest; };
+  assert.deepEqual(xl.transactions.map(strip), csv.transactions.map(strip));
+  assert.deepEqual(xl.skipped, csv.skipped);
+  assert.equal(xl.positions.length, csv.positions.length);
+  // zelfs waar de tekst van de getallen verschilt ("6,10" tegenover 6.1) herkent de import ze als dezelfde
+  assert.deepEqual(B.duplicateFlags(csv.transactions, xl.transactions), xl.transactions.map(() => true));
+  assert.equal(B.parseBoleroSheets({ Blad1: [["a"], [1]] }), null);
+});
+
+test("dubbels: op import-id en voor Bolero op inhoud, met aantallen", () => {
+  const t = { type: "BUY", trade_date: "2026-02-03", asset: "X (BR)", quantity: "10", price: "5.00", amount: "0", import_id: "b:1" };
+  const existing = [t, { ...t, import_id: "b:2" }];
+  // twee gelijke aankopen al aanwezig; drie binnenkomend (andere id's) -> de derde is nieuw
+  assert.deepEqual(B.duplicateFlags(existing, [{ ...t, import_id: "b:7" }, { ...t, price: "5", import_id: "b:8" }, { ...t, import_id: "b:9" }]), [true, true, false]);
+  // id-overeenkomst verbruikt de inhoudsovereenkomst
+  assert.deepEqual(B.duplicateFlags(existing, [{ ...t, import_id: "b:9" }, t, { ...t, import_id: "b:2" }]), [false, true, true]);
+  // Saxo enkel op id
+  assert.deepEqual(B.duplicateFlags([{ ...t, import_id: "s:1|1" }], [{ ...t, import_id: "s:2|1" }]), [false]);
+});
+
+test("waarschuwing als de export niet alle aankopen bevat", () => {
+  const rows = B.parseCsv(SAMPLE).filter(r => !/Aankoop Online US CORP/.test(r.join()));
+  const r = B.parseBoleroRows(rows, { fileName: "kort.csv" });
+  assert.ok(/niet alle aankopen voor: US CORP \(NY\)/.test(r.warnings[0]));
+  assert.deepEqual(r.period, ["2019-02-01", "2026-09-21"]); assert.deepEqual(r.incomplete, ["US CORP (NY)"]);
+  assert.ok(!B.parseBolero(SAMPLE).warnings.some(w => w.includes("niet alle aankopen")));
+});
+
+test("real export (optional)", { skip: !process.env.BOLERO_FILE }, async () => {
+  const file = fs.readFileSync(process.env.BOLERO_FILE);
+  const r = file[0] === 0x50 && file[1] === 0x4b
+    ? B.parseBoleroSheets(await require("./xlsx.js").readXlsx(file))
+    : B.parseBolero(file.toString("utf8"));
   assert.ok(r.transactions.length > 0);
   const rep = M.calculate(r.transactions, Object.fromEntries(Object.entries(r.refHints).map(([k, v]) => [k, v.value])));
-  for (const t of r.transactions.filter(t => t.type === "SELL" && t.bolero_result != null)) {
+  // enkel verkopen waarvan de aankopen in de export staan
+  for (const t of r.transactions.filter(t => t.type === "SELL" && t.bolero_result != null && !r.incomplete.includes(t.asset))) {
     const s = rep.sales.find(x => x.asset === t.asset && x.trade_date === t.trade_date);
     assert.equal(s.result_eur.toFixed(2), D2(t.bolero_result), `${t.asset} ${t.trade_date}`);
   }

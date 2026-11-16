@@ -118,3 +118,128 @@ test("regel zonder ISIN krijgt de ISIN van hetzelfde instrument", () => {
   assert.equal(r.assets["VOORBEELD ETF ACC"].isin, "IE0000000009");
   assert.ok(!r.warnings.some(w => w.includes("Voorbeeld ETF") && w.includes("geen ISIN")));
 });
+
+// ---------------------------------------------------------------- standaardexport "Transacties" (sinds 2026)
+// Blad "Transacties": één regel per boeking; blad "_Transacties": aantal en prijs per uitvoering (ook corporate actions).
+const TH = ["Gebruikersnaam", "Transactiedatum", "Valutadatum", "Rekening-ID", "Transactie-ID", " Positie-ID", "Corporate action-Id", "Bk Record Id",
+  "Booking Id", "Transactietype", "Acties", "Boekingsbedrag", "Valuta", "Omrekeningskoers", "Conversion cost", "Totale kosten", "Gerealiseerde W/V",
+  "IBAN", "Opmerking", "Instrument", "Instrumentsymbool", "Instrument ISIN", "Instrumentvaluta", "Type", "Uitwisselingsbeschrijving"];
+const EH = ["Rekening-ID", "Transactie-ID", "Bk Record Id", "Booking Id", "Corporate action-Id", "Acties", "Order-ID", "Aangepaste transactiedatum",
+  "Trade execution date", "Trade Event Type", "Trade Type", "Openen/sluiten", "Traded Quantity", "Prijs", "Verhandelde waarde", "Spreadkosten",
+  "From Derivative", "Underlying asset type", "Instrument", "Instrumentsymbool", "Instrument ISIN", "Instrumentvaluta", "Type", "Uitwisselingsbeschrijving"];
+const BH = ["Rekening-ID", "Transactie-ID", "Bk Record Id", "Booking Id", "Corporate action-Id", "Acties", "Amount Type", "Amount Type Id",
+  "Boekingsbedrag", "Conversion cost", "Omrekeningskoers", "Boekingsdatum", "Ex-datum", "Transactiedatum", "Eligible quantity", "Instrument", "Instrument ISIN", "Instrumentvaluta"];
+const mk = H => o => H.map(k => (k in o ? o[k] : null));
+const day = iso => Math.floor(serial(iso));
+const INS = {
+  A: { "Instrument": "Alfa Bouw NV", "Instrumentsymbool": "ALFA:xbru", "Instrument ISIN": "BE0000000101", "Instrumentvaluta": "EUR", "Type": "Stock" },
+  B: { "Instrument": "Beta Corp.", "Instrumentsymbool": "BETA:xnys", "Instrument ISIN": "US0000000102", "Instrumentvaluta": "USD", "Type": "Stock" },
+  C: { "Instrument": "*Delisted 20260801 (Gamma Foods)", "Instrumentsymbool": "GAM:xbru", "Instrument ISIN": "BE0000000103", "Instrumentvaluta": "EUR", "Type": "Stock" },
+  D: { "Instrument": "Delta Media N.V.", "Instrumentsymbool": "DEL:xams", "Instrument ISIN": "NL0000000104", "Instrumentvaluta": "EUR", "Type": "Stock" },
+};
+function standardExport() {
+  const T = mk(TH), E = mk(EH), Bk = mk(BH);
+  const trade = (date, id, ins, action, amount, costs, { rate = 1, pl = null } = {}) =>
+    T({ "Transactiedatum": serial(date), "Transactie-ID": id, "Transactietype": "Transactie", "Acties": action, "Boekingsbedrag": amount, "Valuta": "EUR",
+      "Omrekeningskoers": rate, "Totale kosten": costs, "Gerealiseerde W/V": pl, ...INS[ins] });
+  const exec = (date, id, ins, qty, price, extra = {}) =>
+    E({ "Transactie-ID": id, "Aangepaste transactiedatum": day(date), "Trade execution date": serial(date), "Traded Quantity": qty, "Prijs": price,
+      "Verhandelde waarde": -qty * price, "Openen/sluiten": qty > 0 ? "To Open" : "To Close", "Trade Event Type": qty > 0 ? "Gekocht" : "Verkocht", ...INS[ins], ...extra });
+  const ca = (date, id, ins, action, amount, extra = {}) =>
+    T({ "Transactiedatum": serial(date), "Corporate action-Id": id, "Transactietype": "Corporate action", "Acties": action, "Boekingsbedrag": amount,
+      "Valuta": "EUR", "Omrekeningskoers": 1, "Totale kosten": 0, ...INS[ins], ...extra });
+  // aflopend zoals Saxo
+  return {
+    Transacties: [TH,
+      ca("2026-10-01", "CA3", "C", null, -20, { "Bk Record Id": 903 }),                       // ingehouden meerwaardebelasting op het bod
+      trade("2026-09-15", "X6", "A", "Verkoop -40 @ 30.00 EUR", 1194.90, -5.10, { pl: 190 }),
+      ca("2026-07-01", "CA3", "C", "Openbaar overnamebod", 600),
+      ca("2026-05-05", "CA4", "A", "Cashdividend", 30.80),
+      ca("2026-05-03", "CA4", "A", "Cashdividend - Reversal", -30.80),
+      ca("2026-05-02", "CA4", "A", "Cashdividend", 30.80),
+      ca("2026-04-20", "CA5", "D", "Cashdividend - Reversal", -12),                         // volledig teruggeboekt
+      ca("2026-04-10", "CA5", "D", "Cashdividend", 12),
+      ca("2026-03-02", "CA6", "A", "Waardevermindering", 25),
+      ca("2026-02-01", "CA7", "B", "Cashdividend", 8.5, { "Omrekeningskoers": 0.9 }),
+      T({ "Transactiedatum": serial("2026-01-20"), "Transactietype": "Storting/opname", "Acties": "Storting", "Boekingsbedrag": 500, "Valuta": "EUR" }),
+      ca("2025-12-02", "CA2", "D", "Omgekeerde aandelensplitsing", 3.6),                      // fractie in cash
+      ca("2025-11-18", "CA2", "D", "Omgekeerde aandelensplitsing", 0),
+      trade("2025-09-01", "X4", "D", "Koop 125 @ 2.00 EUR", -253, -3),
+      trade("2025-06-10", "X3", "C", "Koop 4 @ 120.00 EUR", -485, -5),
+      trade("2025-03-03", "X2", "B", "Koop 10 @ 50.00 USD", -455, -5, { rate: 0.9 }),
+      trade("2025-02-03", "X1", "A", "Koop 100 @ 20.00 EUR", -2010, -10),
+    ],
+    _Transacties: [EH,
+      exec("2026-10-01", "X5", "C", -4, 150, { "Corporate action-Id": "CA3", "Bk Record Id": 903 }),   // herboeking van het bod
+      exec("2026-09-15", "X6", "A", -40, 30, { "Acties": "Verkoop -40 @ 30.00 EUR" }),
+      exec("2026-07-01", "X5", "C", -4, 150, { "Corporate action-Id": "CA3", "Acties": "Openbaar overnamebod" }),
+      exec("2026-06-01", "X7", "A", 1, 31, { "Corporate action-Id": "CA8", "Acties": "Herbeleggingsdividend" }),
+      exec("2025-11-18", "X8", "D", -125, 2, { "Corporate action-Id": "CA2", "Acties": "Omgekeerde aandelensplitsing" }),
+      exec("2025-11-18", "X9", "D", 12, 20, { "Corporate action-Id": "CA2", "Acties": "Omgekeerde aandelensplitsing" }),
+      exec("2025-09-01", "X4", "D", 125, 2), exec("2025-06-10", "X3", "C", 4, 120), exec("2025-03-03", "X2", "B", 10, 50), exec("2025-02-03", "X1", "A", 100, 20),
+    ],
+    Bookings: [BH,
+      Bk({ "Bk Record Id": 903, "Corporate action-Id": "CA3", "Amount Type": "Meerwaardebelasting", "Boekingsbedrag": -20, "Boekingsdatum": day("2026-10-01") }),
+      Bk({ "Transactie-ID": "X6", "Amount Type": "Meerwaardebelasting", "Boekingsbedrag": -19, "Boekingsdatum": day("2026-09-15") }),
+      Bk({ "Transactie-ID": "X6", "Amount Type": "Commissie", "Boekingsbedrag": -0.9, "Boekingsdatum": day("2026-09-15") }),
+      Bk({ "Transactie-ID": "X6", "Amount Type": "Beurstaks 0.35%", "Boekingsbedrag": -4.2, "Boekingsdatum": day("2026-09-15") }),
+      Bk({ "Corporate action-Id": "CA2", "Amount Type": "Corporate actions - Fracties", "Boekingsbedrag": 3.6, "Boekingsdatum": day("2025-12-02") }),
+      Bk({ "Transactie-ID": "X1", "Amount Type": "Beurstaks 0.35%", "Boekingsbedrag": -7, "Boekingsdatum": day("2025-02-03") }),
+    ],
+  };
+}
+
+test("standaardexport: transacties uit _Transacties met bedragen en kosten uit Transacties", () => {
+  const r = S.parseSaxoSheets(standardExport(), { owner: "ik", fileName: "std.xlsx" });
+  const tx = id => r.transactions.find(t => t.import_id.startsWith(`s:${id}|`));
+  const x1 = tx("X1");
+  assert.equal(x1.type, "BUY"); assert.equal(x1.trade_date, "2025-02-03"); assert.equal(x1.asset, "ALFA BOUW NV");
+  assert.equal(x1.quantity, "100"); assert.equal(x1.price, "20"); assert.equal(x1.taxes, "7"); assert.equal(x1.fees, "3");
+  assert.equal(x1.import_source, "std.xlsx (_Transacties:11)");
+  const x2 = tx("X2");
+  assert.equal(x2.currency, "USD"); assert.equal(x2.fx_per_eur, M.D(1).div("0.9").round(10).toString());
+  // verkoop: kosten zonder de ingehouden meerwaardebelasting
+  const x6 = tx("X6");
+  assert.equal(x6.type, "SELL"); assert.equal(x6.taxes, "4.2"); assert.equal(x6.fees, "0.9"); assert.equal(x6.saxo_result, "190");
+  // overnamebod: één verkoop op de datum van het bod (de herboeking telt niet)
+  const bod = r.transactions.filter(t => t.import_id.startsWith("s:X5|"));
+  assert.equal(bod.length, 1); assert.equal(bod[0].trade_date, "2026-07-01"); assert.equal(bod[0].type, "SELL");
+  assert.equal(bod[0].asset, "GAMMA FOODS"); assert.ok(bod[0].note.includes("Openbaar overnamebod"));
+  assert.equal(r.skipped["Dubbele regels bij corporate actions"], 1);
+  // stockdividend = aankoop zonder kosten
+  const x7 = tx("X7");
+  assert.equal(x7.type, "BUY"); assert.equal(x7.quantity, "1"); assert.equal(x7.price, "31"); assert.equal(x7.fees, "0");
+  assert.equal(new Set(r.transactions.map(t => t.import_id)).size, r.transactions.length);
+  assert.deepEqual(r.period, ["2025-02-03", "2026-09-15"]);
+});
+
+test("standaardexport: omgekeerde splitsing, dividenden, kapitaalvermindering en ingehouden belasting", () => {
+  const r = S.parseSaxoSheets(standardExport(), { owner: "ik", fileName: "std.xlsx" });
+  // 125 -> 12 bij 1 nieuw voor 10 oud: splitsing 0,1 en fractie 0,5 verkocht voor 3,60
+  const split = r.transactions.find(t => t.type === "SPLIT");
+  assert.equal(split.asset, "DELTA MEDIA N.V."); assert.equal(split.trade_date, "2025-11-18"); assert.equal(split.split_ratio, "0.1");
+  const frac = r.transactions.find(t => t.import_id === "s:frac:CA2");
+  assert.equal(frac.type, "SELL"); assert.equal(frac.quantity, "0.5"); assert.equal(frac.price, "7.2"); assert.equal(frac.trade_date, "2025-12-02");
+  assert.ok(!r.transactions.some(t => t.import_id.startsWith("s:X8|") || t.import_id.startsWith("s:X9|")));
+  const pos = Object.fromEntries(r.positions.map(p => [p.asset, p.quantity]));
+  assert.deepEqual(pos, { "ALFA BOUW NV": "100", "BETA CORP.": "10", "GAMMA FOODS": "4", "DELTA MEDIA N.V.": "12" });
+  // dividenden: netto per corporate action; volledig teruggeboekt = niets
+  const divs = r.transactions.filter(t => t.type === "DIVIDEND");
+  assert.deepEqual(divs.map(t => [t.asset, t.trade_date, t.amount]).sort(),
+    [["ALFA BOUW NV", "2026-05-02", "30.8"], ["BETA CORP.", "2026-02-01", "8.5"]]);
+  assert.equal(r.skipped["Teruggeboekte dividenden"], 1);
+  assert.equal(r.skipped["Stortingen en opnames"], 1);
+  assert.equal(r.skipped["Kapitaalverminderingen"], 1);
+  assert.ok(r.warnings.some(w => w.includes("Waardevermindering") && w.includes("niet uitdrukkelijk")));
+  assert.equal(r.skipped["Ingehouden meerwaardebelasting (apart geboekt)"], 1);
+  // ingehouden meerwaardebelasting per jaar
+  assert.deepEqual(r.withheld, { 2026: "39" });
+  assert.ok(r.warnings.some(w => w.includes("Saxo hield meerwaardebelasting in")));
+  // geschrapt na het bod: niets meer te doen
+  assert.deepEqual(r.delistings, []);
+  // de rekenkern kan alles verwerken
+  const rep = M.calculate(r.transactions, { "ALFA BOUW NV": "25", "GAMMA FOODS": "130" });
+  const sale = rep.sales.find(s => s.asset === "ALFA BOUW NV");
+  assert.equal(sale.result_eur.toFixed(2), "200.00"); // 40 x (30 - 25)
+  assert.equal(rep.sales.find(s => s.asset === "GAMMA FOODS").result_eur.toFixed(2), "80.00"); // 4 x (150 - 130)
+});

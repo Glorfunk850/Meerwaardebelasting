@@ -791,7 +791,8 @@ function renderSettings() {
   $("#year-table tbody").innerHTML = Object.keys(state.years).sort().map(y => yearRow(y, state.years[y])).join("");
   $("#withheld-table tbody").innerHTML = state.withheld.length ? state.withheld
     .slice().sort((a, b) => a.year - b.year || a.owner.localeCompare(b.owner)).map(w => `
-    <tr><td>${esc(w.owner)}</td><td>${w.year}</td><td class="num">${eur(w.amount)}</td>
+    <tr><td>${esc(w.owner)}</td><td>${w.year}</td><td class="num">${eur(w.amount)}${w.parts && Object.keys(w.parts).length > 1
+      ? `<br><span class="small muted">${Object.entries(w.parts).map(([b, v]) => `${esc(b)} ${eur(v)}`).join(" + ")}</span>` : ""}</td>
       <td class="actions-cell"><button class="btn small danger" data-delw="${esc(w.owner)}|${w.year}" aria-label="Verwijder">✕</button></td></tr>`).join("")
     : `<tr><td colspan="4" class="muted">Geen inhoudingen ingevoerd.</td></tr>`;
   $("#withheld-form").elements.owner.value ||= DEFAULT_OWNER;
@@ -964,15 +965,18 @@ $("#import-bolero").addEventListener("change", async e => {
     const buf = await file.arrayBuffer();
     const head = new Uint8Array(buf.slice(0, 2));
     let r;
-    if (head[0] === 0x50 && head[1] === 0x4b) r = await window.SAXO.parseSaxoFile(buf, { owner: DEFAULT_OWNER, fileName: file.name });
-    else {
+    if (head[0] === 0x50 && head[1] === 0x4b) {
+      const sheets = await window.XLSX_LITE.readXlsx(buf);
+      r = window.BOLERO.parseBoleroSheets(sheets, { owner: DEFAULT_OWNER, fileName: file.name })
+        || window.SAXO.parseSaxoSheets(sheets, { owner: DEFAULT_OWNER, fileName: file.name });
+    } else {
       const text = new TextDecoder().decode(buf);
       if (/Datum transactie/.test(text)) r = window.BOLERO.parseBolero(text, { owner: DEFAULT_OWNER, fileName: file.name });
       else if (/Instrument ISIN/i.test(text)) {
         const first = text.split(/\r?\n/, 1)[0];
         const rows = window.BOLERO.parseCsv(text, first.split(";").length > first.split(",").length ? ";" : ",");
         r = window.SAXO.parseSaxoSheets({ csv: rows }, { owner: DEFAULT_OWNER, fileName: file.name });
-      } else throw new Error("Bestand niet herkend. Gebruik de Bolero-export 'Cashbewegingen' (CSV) of de Saxo-export 'Trades' (Excel).");
+      } else throw new Error("Bestand niet herkend. Gebruik de Bolero-export 'Cashbewegingen' of de Saxo-export 'Transacties' (Excel of CSV).");
     }
     r.source ??= "bolero";
     r.keyMoves = window.SAXO.keyMigrations(state.transactions, r.transactions);
@@ -991,8 +995,8 @@ function openImportDialog(r) {
     <td>${esc(d.date)}</td><td class="num">${num(d.quantity)}</td>
     <td><select name="mode">${Object.entries(DELIST_LABELS).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("")}</select></td>
     <td><input name="price" inputmode="decimal" class="num" placeholder="EUR per stuk" disabled aria-label="Uitkoopprijs"></td></tr>`).join("");
-  const existing = new Set(state.transactions.map(t => t.import_id).filter(Boolean));
-  const fresh = r.transactions.filter(t => !existing.has(t.import_id));
+  const dupFlags = window.BOLERO.duplicateFlags(state.transactions, r.transactions);
+  const fresh = r.transactions.filter((t, i) => !dupFlags[i]);
   const cnt = type => fresh.filter(t => t.type === type).length;
   const dup = r.transactions.length - fresh.length;
   $("#imp-summary").innerHTML = `<strong>${esc(r.fileName)}</strong>: ${r.rows} regels gelezen.
@@ -1070,10 +1074,10 @@ $("#imp-confirm").addEventListener("click", () => {
         price: mode === "UITKOOP" && $("[name=add]", tr).checked ? dec($("[name=price]", tr).value, `uitkoopprijs voor ${d.name}`, { required: true, nonNegative: true }) : null };
     });
     const moved = moveAssetKeys(r.keyMoves);
-    const existing = new Set(state.transactions.map(t => t.import_id).filter(Boolean));
+    const dupFlags = window.BOLERO.duplicateFlags(state.transactions, r.transactions);
     let added = 0;
-    for (const t of r.transactions) {
-      if (existing.has(t.import_id)) continue;
+    for (const [i, t] of r.transactions.entries()) {
+      if (dupFlags[i]) continue;
       state.transactions.push({ ...t, owner, id: state.nextId++ });
       added++;
     }
@@ -1109,20 +1113,41 @@ $("#imp-confirm").addEventListener("click", () => {
           note: "Correctie bij import: niet meer in bezit op 31/12/2025 (vóór 2026, dus geen belastbaar moment)" });
       }
     }
-    // door Bolero ingehouden meerwaardebelasting (kolom in de export) per jaar overnemen als er nog niets staat
+    // door de broker ingehouden meerwaardebelasting per jaar overnemen (Bolero: kolom per verkoop; Saxo: boekingen)
     const perYear = {};
     for (const t of r.transactions) if (t.bolero_tax && !D(t.bolero_tax).isZero()) {
       const y = Number(t.trade_date.slice(0, 4)); perYear[y] = (perYear[y] || D(0)).add(D(t.bolero_tax).lt(0) ? D(t.bolero_tax).neg() : D(t.bolero_tax));
     }
-    for (const [y, amt] of Object.entries(perYear))
-      if (!state.withheld.some(w => w.owner === owner && w.year === Number(y))) state.withheld.push({ owner, year: Number(y), amount: amt.toString() });
+    for (const [y, amt] of Object.entries(r.withheld || {})) perYear[y] = (perYear[y] || D(0)).add(D(amt));
+    const brokerName = r.source === "saxo" ? "Saxo" : "Bolero";
+    const notMerged = Object.entries(perYear).filter(([y, amt]) => !mergeWithheld(owner, Number(y), brokerName, amt))
+      .map(([y, amt]) => `${y}: ${eur(amt.toFixed(2))}`);
     const need = neededRefAssets();
     const missing = [...need.keys()].filter(a => needsRef(a) && !(state.assets[a]?.ref_value_eur));
     $("#import-dialog").close(); pendingImport = null;
     commit();
-    toast(`${added} transacties geïmporteerd` + (moved ? `; ${moved} ${moved === 1 ? "effect staat" : "effecten staan"} nu onder de naam` : "") + (missing.length ? `. Vul nog de waarde op 31/12/2025 in bij Activa voor: ${missing.map(a => state.assets[a]?.name || a).join(", ")}` : ""), missing.length > 0);
+    toast(`${added} transacties geïmporteerd` + (moved ? `; ${moved} ${moved === 1 ? "effect staat" : "effecten staan"} nu onder de naam` : "") + (missing.length ? `. Vul nog de waarde op 31/12/2025 in bij Activa voor: ${missing.map(a => state.assets[a]?.name || a).join(", ")}` : "")
+      + (notMerged.length ? `. ${brokerName} hield meerwaardebelasting in (${notMerged.join(", ")}); je had voor dat jaar al zelf een bedrag ingevuld – pas het aan bij Instellingen als nodig` : ""),
+      missing.length > 0 || notMerged.length > 0);
   } catch (err) { toast(err.message, true); }
 });
+
+/**
+ * Ingehouden bedrag per broker bijhouden (parts) en optellen. Een zelf ingevuld bedrag (zonder parts) blijft staan.
+ * Een export dekt soms maar een deel van het jaar: het bedrag van een broker wordt enkel verhoogd, nooit verlaagd.
+ */
+function mergeWithheld(owner, year, broker, amt) {
+  let w = state.withheld.find(x => x.owner === owner && x.year === year);
+  if (w && !w.parts) {
+    if (!D(w.amount).isZero()) return false; // zelf ingevuld of door een oudere versie: niet aanraken
+    w.parts = {};
+  }
+  if (!w) { w = { owner, year, amount: "0", parts: {} }; state.withheld.push(w); }
+  if (w.parts[broker] != null && D(w.parts[broker]).gte(amt)) return true;
+  w.parts[broker] = amt.toString();
+  w.amount = Object.values(w.parts).reduce((s, v) => s.add(D(v)), D(0)).toString();
+  return true;
+}
 
 const isIsinCode = k => /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(String(k || ""));
 /** Oude naam -> nieuwe naam in transacties en activa (bv. Saxo-effecten die vroeger onder de ISIN stonden). */
