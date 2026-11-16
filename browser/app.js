@@ -290,8 +290,10 @@ function renderReport() {
     }).join("");
   }
 
+  // open verkopen blijven open na een wijziging (bv. de waarde op 31/12/2025 bewaren)
+  const openSales = new Set($$("#sales details[open]").map(d => d.dataset.sale));
   $("#sales").innerHTML = r.sales.length ? r.sales.slice().reverse().map(s => `
-    <details><summary>
+    <details data-sale="${esc(s.source)}"${openSales.has(s.source) ? " open" : ""}><summary>
       <span>${esc(s.trade_date)}</span><strong class="grow">${esc(assetLabel(s.asset))}${s.kind === "UITKOOP" ? ` <span class="badge SELL">uitkoop</span>` : ""}</strong>
       <span class="muted small">${num(s.quantity.toString())} st.${s.broker ? " · " + esc(s.broker) : ""}</span>
       <span class="num ${signClass(s.result_eur.toFixed(2))}"><strong>${eur(s.result_eur.toFixed(2))}</strong></span>
@@ -308,6 +310,7 @@ function renderReport() {
         <td>${esc(BASIS_LABELS[l.basis_used])}</td><td class="num ${signClass(l.result_eur.toFixed(2))}">${eur(l.result_eur.toFixed(2))}</td>
         <td class="small">${esc(l.note)}</td></tr>`).join("")}</tbody></table></div>
       ${s.warnings.map(w => `<div class="alert warn small">${esc(w)}</div>`).join("")}
+      ${saleRefEditor(s)}
     </div></details>`).join("") : `<p class="empty">Nog geen verkopen vanaf 2026.</p>`;
 
   const ev = r.events.filter(e => e.kind !== "UITKOOP");
@@ -318,6 +321,31 @@ function renderReport() {
       <span class="muted small">${num(e.quantity_held.toString())} st. in bezit · ${esc(e.owner)}</span></div>
       <p class="small muted">${esc(e.note)}</p></div>`).join("");
 }
+
+/** Waarde 31/12/2025 van het verkochte effect rechtstreeks bij de verkoop aanpassen
+ *  (enkel als de verkoop loten van vóór 2026 bevat; dezelfde waarde als op het tabblad Activa). */
+function saleRefEditor(s) {
+  if (!s.lines.some(l => l.acquired && l.acquired < "2026-01-01")) return "";
+  const a = state.assets[s.asset] || {}, ccy = (a.currency || "EUR").toUpperCase();
+  const split = state.transactions.some(t => t.asset === s.asset && t.type === "SPLIT" && t.trade_date >= "2026-01-01");
+  return `<div class="ref-edit" data-refasset="${esc(s.asset)}">
+    <strong class="small">Waarde 31/12/2025 per stuk${ccy === "EUR" ? " (EUR)" : ""}</strong>
+    <div class="row">${refInputs(ccy, a, ccy === "EUR" ? "slotkoers in EUR" : "")}
+      <input name="ref_source" value="${esc(a.ref_source)}" placeholder="Bron, bv. Euronext slotkoers" aria-label="Bron">
+      <button class="btn small primary" data-saveref>Bewaar</button></div>
+    <span class="hint">Geldt voor alle verkopen van dit effect (zelfde waarde als op het tabblad Activa).${split
+      ? " Let op: vul de koers van vóór de splitsing in 2026 in; de tool rekent de splitsing zelf om." : ""}</span></div>`;
+}
+$("#sales").addEventListener("input", e => { const box = e.target.closest("[data-refasset]"); if (box) syncRef(box); });
+$("#sales").addEventListener("click", e => {
+  if (!e.target.closest("[data-saveref]")) return;
+  const box = e.target.closest("[data-refasset]"), id = box.dataset.refasset;
+  try {
+    const ref = readRef(box, assetLabel(id));
+    state.assets[id] = { ...state.assets[id], ...ref, ref_source: $("[name=ref_source]", box).value.trim() };
+    commit(); toast(`Waarde 31/12/2025 voor ${assetLabel(id)} bewaard`);
+  } catch (err) { toast(err.message, true); }
+});
 
 /** Naam als die gekend is en verschilt van de sleutel (bv. ISIN), anders de sleutel. */
 function assetLabel(id) {
