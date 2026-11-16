@@ -89,7 +89,13 @@
 
   /** Excel-serienummer -> "JJJJ-MM-DD" */
   function excelDate(v) {
-    if (typeof v === "string") { const m = /^(\d{4})-(\d\d)-(\d\d)/.exec(v) || /^(\d\d)[-/](\d\d)[-/](\d{4})/.exec(v); return m ? (m[1].length === 4 ? `${m[1]}-${m[2]}-${m[3]}` : `${m[3]}-${m[2]}-${m[1]}`) : null; }
+    if (typeof v === "string") {
+      // JJJJ-MM-DD of DD-MM-JJJJ / D/M/JJJJ / DD.MM.JJJJ (Belgische volgorde: dag eerst)
+      const m = /^(\d{4})-(\d\d)-(\d\d)/.exec(v.trim()) || /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/.exec(v.trim());
+      if (!m) return null;
+      const [y, mo, d] = m[1].length === 4 ? [m[1], m[2], m[3]] : [m[3], m[2], m[1]];
+      return +mo >= 1 && +mo <= 12 && +d >= 1 && +d <= 31 ? `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}` : null;
+    }
     if (typeof v !== "number" || !isFinite(v)) return null;
     const d = new Date(Math.round((Math.floor(v) - 25569) * 864e5));
     return d.toISOString().slice(0, 10);
