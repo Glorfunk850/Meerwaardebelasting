@@ -290,8 +290,10 @@ function renderReport() {
     }).join("");
   }
 
+  // open verkopen blijven open na een wijziging (bv. de waarde op 31/12/2025 bewaren)
+  const openSales = new Set($$("#sales details[open]").map(d => d.dataset.sale));
   $("#sales").innerHTML = r.sales.length ? r.sales.slice().reverse().map(s => `
-    <details><summary>
+    <details data-sale="${esc(s.source)}"${openSales.has(s.source) ? " open" : ""}><summary>
       <span>${esc(s.trade_date)}</span><strong class="grow">${esc(assetLabel(s.asset))}${s.kind === "UITKOOP" ? ` <span class="badge SELL">uitkoop</span>` : ""}</strong>
       <span class="muted small">${num(s.quantity.toString())} st.${s.broker ? " · " + esc(s.broker) : ""}</span>
       <span class="num ${signClass(s.result_eur.toFixed(2))}"><strong>${eur(s.result_eur.toFixed(2))}</strong></span>
@@ -308,6 +310,7 @@ function renderReport() {
         <td>${esc(BASIS_LABELS[l.basis_used])}</td><td class="num ${signClass(l.result_eur.toFixed(2))}">${eur(l.result_eur.toFixed(2))}</td>
         <td class="small">${esc(l.note)}</td></tr>`).join("")}</tbody></table></div>
       ${s.warnings.map(w => `<div class="alert warn small">${esc(w)}</div>`).join("")}
+      ${saleRefEditor(s)}
     </div></details>`).join("") : `<p class="empty">Nog geen verkopen vanaf 2026.</p>`;
 
   const ev = r.events.filter(e => e.kind !== "UITKOOP");
@@ -318,6 +321,31 @@ function renderReport() {
       <span class="muted small">${num(e.quantity_held.toString())} st. in bezit · ${esc(e.owner)}</span></div>
       <p class="small muted">${esc(e.note)}</p></div>`).join("");
 }
+
+/** Waarde 31/12/2025 van het verkochte effect rechtstreeks bij de verkoop aanpassen
+ *  (enkel als de verkoop loten van vóór 2026 bevat; dezelfde waarde als op het tabblad Activa). */
+function saleRefEditor(s) {
+  if (!s.lines.some(l => l.acquired && l.acquired < "2026-01-01")) return "";
+  const a = state.assets[s.asset] || {}, ccy = (a.currency || "EUR").toUpperCase();
+  const split = state.transactions.some(t => t.asset === s.asset && t.type === "SPLIT" && t.trade_date >= "2026-01-01");
+  return `<div class="ref-edit" data-refasset="${esc(s.asset)}">
+    <strong class="small">Waarde 31/12/2025 per stuk${ccy === "EUR" ? " (EUR)" : ""}</strong>
+    <div class="row">${refInputs(ccy, a, ccy === "EUR" ? "slotkoers in EUR" : "")}
+      <input name="ref_source" value="${esc(a.ref_source)}" placeholder="Bron, bv. Euronext slotkoers" aria-label="Bron">
+      <button class="btn small primary" data-saveref>Bewaar</button></div>
+    <span class="hint">Geldt voor alle verkopen van dit effect (zelfde waarde als op het tabblad Activa).${split
+      ? " Let op: vul de koers van vóór de splitsing in 2026 in; de tool rekent de splitsing zelf om." : ""}</span></div>`;
+}
+$("#sales").addEventListener("input", e => { const box = e.target.closest("[data-refasset]"); if (box) syncRef(box); });
+$("#sales").addEventListener("click", e => {
+  if (!e.target.closest("[data-saveref]")) return;
+  const box = e.target.closest("[data-refasset]"), id = box.dataset.refasset;
+  try {
+    const ref = readRef(box, assetLabel(id));
+    state.assets[id] = { ...state.assets[id], ...ref, ref_source: $("[name=ref_source]", box).value.trim() };
+    commit(); toast(`Waarde 31/12/2025 voor ${assetLabel(id)} bewaard`);
+  } catch (err) { toast(err.message, true); }
+});
 
 /** Naam als die gekend is en verschilt van de sleutel (bv. ISIN), anders de sleutel. */
 function assetLabel(id) {
@@ -707,30 +735,33 @@ function renderAssets() {
   const held = new Set(window.MWB.holdingsAt(state.transactions, "9999-12-31", cfg).map(h => h.asset));
   const used = isin => state.transactions.some(t => t.asset === isin);
   const closed = ([isin, a]) => used(isin) && !held.has(isin) && !refMissing(isin, a);
-  // afgesloten en door de gebruiker verwijderd: nooit meer tonen (komt terug zodra er weer stuks in bezit zijn)
+  // afgesloten (en eventueel door de gebruiker uit de lijst verwijderd): enkel tonen met het vinkje,
+  // zodat de waarde op 31/12/2025 achteraf nog te corrigeren blijft
   const removed = e => !!e[1].hidden && closed(e);
-  const shownClosed = all.filter(e => closed(e) && !removed(e)), showClosed = $("#asset-show-closed").checked;
-  $("#asset-closed-toggle").hidden = !shownClosed.length;
-  $("#asset-closed-count").textContent = shownClosed.length;
-  const list = all.filter(e => !removed(e) && (showClosed || !closed(e)));
+  const allClosed = all.filter(closed), showClosed = $("#asset-show-closed").checked;
+  $("#asset-closed-toggle").hidden = !allClosed.length;
+  $("#asset-closed-count").textContent = allClosed.length;
+  const list = all.filter(e => showClosed || !closed(e));
   $("#asset-empty").hidden = list.length > 0;
   $("#asset-empty").textContent = all.length ? "Geen activa meer in portefeuille." : "Nog geen activa.";
   const missing = list.filter(([i, a]) => refMissing(i, a)).length;
   $("#asset-missing").hidden = !missing;
   $("#asset-missing").textContent = `${missing === 1 ? "1 effect" : `${missing} effecten`} die je op 31/12/2025 had, ${missing === 1 ? "heeft" : "hebben"} nog geen waarde op 31/12/2025. Die is nodig zodra je ze verkoopt.`;
   $("#asset-table tbody").innerHTML = list.map(([isin, a]) => {
-    const need = needsRef(isin), u = used(isin), gone = closed([isin, a]);
+    const need = needsRef(isin), u = used(isin), gone = closed([isin, a]), off = removed([isin, a]);
     return `<tr data-isin="${esc(isin)}"${gone ? ` class="muted"` : ""}>
       <td><strong>${esc(isin)}</strong>${a.name && isIsinCode(isin) ? `<br><span class="small muted">${esc(a.name)}</span>` : ""}${need && (a.ref_value_eur == null || a.ref_value_eur === "") ? ` <span class="badge need">waarde nodig</span>` : ""}
         ${delistedOn(isin) ? ` <span class="badge" title="Delisting geregistreerd">geschrapt ${esc(delistedOn(isin))}</span>` : ""}
-        ${gone ? ` <span class="badge" title="Niet meer in portefeuille">afgesloten</span>` : ""}</td>
+        ${gone ? ` <span class="badge" title="Niet meer in portefeuille">afgesloten</span>` : ""}
+        ${off ? ` <span class="badge" title="Eerder uit de lijst verwijderd">verwijderd uit de lijst</span>` : ""}</td>
       <td><input name="isin" value="${esc(a.isin || (isIsinCode(isin) ? isin : ""))}" maxlength="12" placeholder="niet in export" autocapitalize="characters" aria-label="ISIN"></td>
       <td><select name="asset_type" aria-label="Type">${ASSET_TYPES.map(t => `<option ${t === a.asset_type ? "selected" : ""}>${t}</option>`).join("")}</select></td>
       <td><input name="currency" value="${esc(a.currency)}" maxlength="5" class="w-sm" aria-label="Munt"></td>
       <td>${refInputs((a.currency || "EUR").toUpperCase(), a, need ? "verplicht" : "n.v.t.")}</td>
       <td><input name="ref_source" value="${esc(a.ref_source)}" placeholder="bv. Euronext slotkoers, ECB-koers" aria-label="Bron"></td>
       <td class="actions-cell"><button class="btn small primary" data-save>Bewaar</button>
-        ${gone ? `<button class="btn small danger" data-removeasset aria-label="Verwijder uit de lijst" title="Verwijder uit de lijst">✕</button>`
+        ${off ? `<button class="btn small" data-restoreasset title="Terug in de lijst zetten">Terugzetten</button>`
+          : gone ? `<button class="btn small danger" data-removeasset aria-label="Verwijder uit de lijst" title="Verwijder uit de lijst">✕</button>`
           : u ? "" : `<button class="btn small danger" data-delasset aria-label="Verwijder">✕</button>`}</td></tr>`;
   }).join("");
 }
@@ -750,6 +781,10 @@ $("#asset-table").addEventListener("click", async e => {
         `De transacties blijven bewaard en tellen mee in het rapport.`)) {
       state.assets[isin].hidden = true; commit(); toast(`${label} verwijderd uit de lijst`);
     }
+    return;
+  }
+  if (e.target.closest("[data-restoreasset]")) {
+    delete state.assets[isin].hidden; commit(); toast(`${label} terug in de lijst`);
     return;
   }
   if (!e.target.closest("[data-save]")) return;
