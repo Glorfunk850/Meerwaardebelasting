@@ -290,7 +290,9 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
       <label class="field g-amount">Bedrag <input name="amount" inputmode="decimal"></label>
       <label class="field g-split">Ratio (nieuwe stuks per oud stuk) <input name="split_ratio" inputmode="decimal" placeholder="4 = 4:1"></label>
       <label class="field g-ccy">Munt <input name="currency" value="EUR" maxlength="5" autocapitalize="characters"></label>
-      <label class="field g-ccy">Wisselkoers (1 EUR = … munt) <input name="fx_per_eur" value="1" inputmode="decimal"></label>
+      <div class="field g-ccy"><span>Wisselkoers <select name="fx_dir" aria-label="Richting wisselkoers">
+          <option value="PER_EUR">1 EUR = … munt</option><option value="EUR_PER">1 munt = … EUR</option></select></span>
+        <input name="fx" value="1" inputmode="decimal" aria-label="Wisselkoers"></div>
       <label class="field g-fees">Kosten <input name="fees" value="0" inputmode="decimal"></label>
       <label class="field g-fees">Taksen (bv. beurstaks) <input name="taxes" value="0" inputmode="decimal"></label>
       <label class="field g-reynders">Reynders-bedrag (EUR) <input name="reynders_eur" value="0" inputmode="decimal"></label>

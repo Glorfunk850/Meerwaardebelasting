@@ -163,6 +163,15 @@ function dec(value, field, { required = false, positive = false, nonNegative = f
   if (nonNegative && d.lt(0)) throw new InputError(`Veld '${field}' mag niet negatief zijn.`);
   return d.toString();
 }
+/** Wisselkoers uit het formulier (fx_dir + fx) of uit bestaande gegevens (fx_per_eur / eur_per_ccy).
+ *  Wordt bewaard zoals ingegeven: 1 EUR = … munt in fx_per_eur, of 1 munt = … EUR in eur_per_ccy. */
+function txFx(p) {
+  const dir = p.fx_dir || (hasVal(p.eur_per_ccy) ? "EUR_PER" : "PER_EUR");
+  const raw = p.fx_dir ? p.fx : (dir === "EUR_PER" ? p.eur_per_ccy : p.fx_per_eur);
+  const fx = dec(hasVal(raw) ? raw : "1", "wisselkoers", { positive: true });
+  return dir === "EUR_PER" ? { fx_per_eur: "1", eur_per_ccy: fx } : { fx_per_eur: fx, eur_per_ccy: null };
+}
+const fxLabel = t => hasVal(t.eur_per_ccy) ? `1 ${t.currency} = ${num(t.eur_per_ccy)} EUR` : `1 EUR = ${num(t.fx_per_eur)} ${t.currency}`;
 function validateTx(p) {
   if (!TYPE_LABELS[p.type]) throw new InputError(`Onbekend transactietype: ${p.type}`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(p.trade_date || "") || isNaN(Date.parse(p.trade_date))) throw new InputError("Datum moet het formaat JJJJ-MM-DD hebben.");
@@ -171,13 +180,14 @@ function validateTx(p) {
   const out = {
     owner: String(p.owner || DEFAULT_OWNER).trim(), broker: String(p.broker || "").trim(), trade_date: p.trade_date,
     type: p.type, asset, currency: String(p.currency || "EUR").trim().toUpperCase(),
-    fx_per_eur: dec(p.fx_per_eur || "1", "wisselkoers", { positive: true }),
+    ...txFx(p),
     fees: dec(p.fees || "0", "kosten", { nonNegative: true }), taxes: dec(p.taxes || "0", "taksen", { nonNegative: true }),
     historic_proven: !!p.historic_proven, cost_known: p.cost_known !== false,
     reynders_eur: dec(p.reynders_eur || "0", "Reynders-bedrag", { nonNegative: true }),
     note: String(p.note || "").trim(), quantity: "0", price: "0", amount: "0", split_ratio: null,
   };
-  if (out.currency === "EUR" && !D(out.fx_per_eur).eq(1)) throw new InputError("Voor EUR moet de wisselkoers 1 zijn.");
+  if (out.currency === "EUR" && !(D(out.fx_per_eur).eq(1) && (out.eur_per_ccy == null || D(out.eur_per_ccy).eq(1))))
+    throw new InputError("Voor EUR moet de wisselkoers 1 zijn.");
   if (ACQ.includes(p.type) || p.type === "SELL") {
     out.quantity = dec(p.quantity, "aantal", { required: true, positive: true });
     const price = dec(p.price, "prijs", { required: p.type === "SELL" || out.cost_known, nonNegative: true });
@@ -417,7 +427,7 @@ function renderTransactions() {
       <td>${esc(t.asset)}</td>
       <td class="num">${["SPLIT", "DIVIDEND", "FEE"].includes(t.type) || (t.type === "DELISTING" && D(t.quantity || 0).isZero()) ? "" : num(t.quantity)}</td>
       <td class="num">${value}</td>
-      <td>${esc(t.currency)}${t.currency !== "EUR" ? ` <span class="muted small">@${num(t.fx_per_eur)}</span>` : ""}</td>
+      <td>${esc(t.currency)}${t.currency !== "EUR" ? ` <span class="muted small" title="${esc(fxLabel(t))}">@${hasVal(t.eur_per_ccy) ? `${num(t.eur_per_ccy)} EUR` : num(t.fx_per_eur)}</span>` : ""}</td>
       <td>${esc(t.owner)}</td><td>${esc(t.broker)}</td>
       <td class="actions-cell"><button class="btn small danger" data-del="${t.id}" aria-label="Verwijder">✕</button></td></tr>`;
   }).join("");
@@ -454,7 +464,13 @@ function updateFieldVisibility() {
   form.elements.price.disabled = acq && t !== "BUY" && !form.elements.cost_known.checked;
 }
 ["type", "trade_date", "cost_known", "delist_mode"].forEach(n => form.elements[n].addEventListener("change", updateFieldVisibility));
-form.elements.currency.addEventListener("input", () => { if (form.elements.currency.value.trim().toUpperCase() === "EUR") form.elements.fx_per_eur.value = "1"; });
+form.elements.currency.addEventListener("input", () => { if (form.elements.currency.value.trim().toUpperCase() === "EUR") form.elements.fx.value = "1"; updateFxLabels(); });
+/** Toon de munt in de keuze van de koersrichting (1 EUR = … USD / 1 USD = … EUR). */
+function updateFxLabels() {
+  const c = form.elements.currency.value.trim().toUpperCase() || "munt";
+  const [perEur, eurPer] = form.elements.fx_dir.options;
+  perEur.textContent = `1 EUR = … ${c}`; eurPer.textContent = `1 ${c} = … EUR`;
+}
 
 function openTxDialog(tx) {
   form.reset();
@@ -468,6 +484,10 @@ function openTxDialog(tx) {
     if (el && el.name) { if (el.type === "checkbox") el.checked = !!v; else el.value = v ?? ""; }
   } else form.elements.trade_date.value = new Date().toISOString().slice(0, 10);
   if (tx && tx.type === "DELISTING" && D(tx.quantity || 0).isZero()) form.elements.quantity.value = "";
+  const inv = !!tx && hasVal(tx.eur_per_ccy);
+  form.elements.fx_dir.value = inv ? "EUR_PER" : "PER_EUR";
+  form.elements.fx.value = tx ? (inv ? tx.eur_per_ccy : tx.fx_per_eur ?? "1") : "1";
+  updateFxLabels();
   updateFieldVisibility();
   openProofs(tx);
   dlg.showModal();

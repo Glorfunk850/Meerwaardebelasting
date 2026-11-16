@@ -234,3 +234,16 @@ test("waarde 31/12/2025 met wisselkoers munt -> EUR", () => {
   assert.throws(() => M.refValueFromEurRate("150", "0"));
   assert.throws(() => M.refValueFromEurRate("-1", "0.85"));
 });
+
+test("wisselkoers in beide richtingen geeft hetzelfde resultaat", () => {
+  const a = [buy("2026-01-05", "US", 10, 100, { currency: "USD", fx_per_eur: "1.25" }),
+             sell("2026-06-01", "US", 10, 130, { currency: "USD", fx_per_eur: "1.25" })];
+  const b = [buy("2026-01-05", "US", 10, 100, { currency: "USD", eur_per_ccy: "0.80" }),
+             sell("2026-06-01", "US", 10, 130, { currency: "USD", eur_per_ccy: "0.80" })];
+  eq(calculate(a, {}).sales[0].result_eur, "240"); eq(calculate(b, {}).sales[0].result_eur, "240");
+  const c = [buy("2026-01-05", "US", 3, "33.33", { currency: "USD", eur_per_ccy: "0.8514" }),
+             sell("2026-06-01", "US", 3, "41.17", { currency: "USD", eur_per_ccy: "0.8571" })];
+  const s = calculate(c, {}).sales[0];
+  eq(s.proceeds_eur, "105.86"); eq(s.result_eur, "20.73");
+  assert.throws(() => calculate([buy("2026-01-05", "US", 1, 1, { currency: "USD", eur_per_ccy: "0" })], {}));
+});

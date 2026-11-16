@@ -370,3 +370,20 @@ def test_ref_value_from_eur_rate():
         ref_value_from_eur_rate("150", "0")
     with pytest.raises(ValueError):
         ref_value_from_eur_rate("-1", "0.85")
+
+
+def test_fx_in_both_directions_gives_same_result():
+    # 1 EUR = 1,25 USD is hetzelfde als 1 USD = 0,80 EUR
+    a = [buy(date(2026, 1, 5), "US", 10, 100, currency="USD", fx_per_eur=D("1.25")),
+         sell(date(2026, 6, 1), "US", 10, 130, currency="USD", fx_per_eur=D("1.25"))]
+    b = [buy(date(2026, 1, 5), "US", 10, 100, currency="USD", eur_per_ccy=D("0.80")),
+         sell(date(2026, 6, 1), "US", 10, 130, currency="USD", eur_per_ccy=D("0.80"))]
+    ra, rb = calculate(a, {}), calculate(b, {})
+    assert ra.sales[0].result_eur == rb.sales[0].result_eur == D("240.00")
+    # onrond: 1 USD = 0,8514 EUR
+    c = [buy(date(2026, 1, 5), "US", 3, D("33.33"), currency="USD", eur_per_ccy=D("0.8514")),
+         sell(date(2026, 6, 1), "US", 3, D("41.17"), currency="USD", eur_per_ccy=D("0.8571"))]
+    s = calculate(c, {}).sales[0]
+    assert s.proceeds_eur == D("105.86") and s.result_eur == D("20.73")
+    with pytest.raises(ValueError):
+        calculate([buy(date(2026, 1, 5), "US", 1, 1, currency="USD", eur_per_ccy=D("0"))], {})

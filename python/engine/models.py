@@ -41,7 +41,8 @@ class BasisUsed(str, Enum):
 @dataclass
 class Transaction:
     """Eén transactie. Prijzen in de transactiemunt; fx_per_eur volgt de
-    ECB-notatie (1 EUR = fx_per_eur eenheden vreemde munt)."""
+    ECB-notatie (1 EUR = fx_per_eur eenheden vreemde munt). Is eur_per_ccy
+    ingevuld (1 eenheid munt = eur_per_ccy EUR), dan geldt die koers."""
 
     trade_date: date
     type: TxType
@@ -61,8 +62,13 @@ class Transaction:
     amount: Decimal = ZERO          # voor DIVIDEND/FEE: totaalbedrag in `currency`
     delist_mode: str = ""           # voor DELISTING: NOTERING | UITKOOP | WAARDELOOS
     source: str = ""                # bv. "bolero.csv:12"
+    eur_per_ccy: Optional[Decimal] = None  # koers in de andere richting: 1 munt = … EUR
 
     def to_eur(self, amount: Decimal) -> Decimal:
+        if self.eur_per_ccy is not None:
+            if self.eur_per_ccy <= 0:
+                raise ValueError(f"Ongeldige wisselkoers in {self.source or self}")
+            return amount * self.eur_per_ccy
         if self.fx_per_eur <= 0:
             raise ValueError(f"Ongeldige wisselkoers in {self.source or self}")
         return amount / self.fx_per_eur
