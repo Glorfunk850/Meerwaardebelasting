@@ -224,6 +224,12 @@ function engineInputs(method) {
   return [txs, refs, cfg, withheld];
 }
 function runReport(method) { return calculate(...engineInputs(method)); }
+/** Zelfde berekening alsof elke aankoop van vóór 2026 met gekende prijs bewijsbaar is (gemist voordeel). */
+function runReportAllProven() {
+  const [txs, ...rest] = engineInputs();
+  if (!txs.some(t => ACQ.includes(t.type) && t.trade_date < "2026-01-01" && t.cost_known !== false && !t.historic_proven)) return null;
+  return calculate(txs.map(t => ACQ.includes(t.type) && t.trade_date < "2026-01-01" && t.cost_known !== false ? { ...t, historic_proven: true } : t), ...rest);
+}
 
 function delistedOn(isin) {
   const d = state.transactions.filter(t => t.asset === isin && t.type === "DELISTING").map(t => t.trade_date).sort();
@@ -258,6 +264,8 @@ function renderReport() {
   const method = state.settings.historic_method, other = method === "FIFO" ? "GEMIDDELD" : "FIFO";
   let alt = null;
   try { alt = runReport(other); } catch {}
+  let proven = null;
+  try { proven = runReportAllProven(); } catch {}
   $("#report-settings").textContent =
     `Historische prijs: ${method === "FIFO" ? "per lot (FIFO)" : "gemiddelde"} · FIFO ${state.settings.fifo_scope === "BROKER" ? "per broker" : "over alle brokers"}`;
 
@@ -270,6 +278,8 @@ function renderReport() {
     cards.innerHTML = r.years.map(y => {
       const a = alt && alt.years.find(x => x.owner === y.owner && x.year === y.year);
       const showAlt = a && !(a.net_eur.eq(y.net_eur) && a.tax_eur.eq(y.tax_eur));
+      const p = proven && proven.years.find(x => x.owner === y.owner && x.year === y.year);
+      const showProven = p && p.tax_eur.lt(y.tax_eur);
       const refund = y.refund_eur;
       const carries = Object.entries(y.carry_detail).map(([k, v]) => `${k}: ${eur(v.toFixed(2))}`).join(", ");
       const f = k => y[k].toFixed(2);
@@ -296,6 +306,11 @@ function renderReport() {
         ${carries ? `<p class="hint">Overdrachten beschikbaar na ${y.year}: ${esc(carries)}</p>` : ""}
         ${showAlt ? `<div class="alert warn small">Met de methode <strong>${other === "FIFO" ? "per lot (FIFO)" : "gemiddelde"}</strong>
           zou de netto meerwaarde ${eur(a.net_eur.toFixed(2))} zijn en de belasting ${eur(a.tax_eur.toFixed(2))}.</div>` : ""}
+        ${showProven ? `<div class="alert warn small"><strong>Mogelijk voordeel:</strong> sommige aankopen van vóór 2026 hebben een hogere
+          prijs dan de waarde op 31/12/2025 maar zijn niet als bewijsbaar aangeduid. Met bewijs zou de belasting
+          ${eur(p.tax_eur.toFixed(2))} zijn i.p.v. ${eur(y.tax_eur.toFixed(2))} (${eur(y.tax_eur.sub(p.tax_eur).toFixed(2))} minder).
+          Zie de verkopen met een uitroepteken. Bij opt-in houdt de broker in op de waarde van 31/12/2025;
+          de historische prijs roep je zelf in via je aangifte.</div>` : ""}
       </article>`;
     }).join("");
   }

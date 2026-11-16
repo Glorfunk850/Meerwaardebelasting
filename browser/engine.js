@@ -115,11 +115,13 @@
   const poolKey = (t, scope) => scope === "BROKER" ? `${t.owner}\u0000${t.broker}\u0000${t.asset}` : `${t.owner}\u0000${t.asset}`;
   const isPre = lot => lot.acquired < START;
 
-  function historicUnit(lot, pool, method) {
+  /** assumeProven: alsof elke aankoop van vóór 2026 met gekende prijs bewijsbaar is (voor de melding 'gemist voordeel'). */
+  function historicUnit(lot, pool, method, assumeProven = false) {
     if (!isPre(lot)) return null;
-    if (method === "FIFO") return lot.historicProven && lot.costKnown ? lot.unitCost : null;
+    const ok = l => l.costKnown && (l.historicProven || assumeProven);
+    if (method === "FIFO") return ok(lot) ? lot.unitCost : null;
     const pre = pool.filter(isPre);
-    if (!pre.length || pre.some(l => !(l.historicProven && l.costKnown))) return null;
+    if (!pre.length || pre.some(l => !ok(l))) return null;
     const q = sum(pre.map(l => l.origQuantity));
     if (q.isZero()) return null;
     return sum(pre.map(l => l.origQuantity.mul(l.unitCost))).div(q);
@@ -127,7 +129,8 @@
 
   function line(lot, qty, proceeds, basis, basisUsed, result, note = "") {
     return { lotId: lot ? lot.lotId : null, acquired: lot ? lot.acquired : null, quantity: qty,
-             proceeds_eur: proceeds, basis_eur: basis, basis_used: basisUsed, result_eur: result, note };
+             proceeds_eur: proceeds, basis_eur: basis, basis_used: basisUsed, result_eur: result, note,
+             missed_historic_eur: ZERO };
   }
 
   function lineForLot(lot, qty, proceeds, saleDate, pool, cfg) {
@@ -148,7 +151,14 @@
         return line(lot, qty, proceeds, hist, "HISTORISCH", Dec.max(ZERO, proceeds.sub(hist)), note);
       }
     }
-    return line(lot, qty, proceeds, ref, "REF_31_12_2025", proceeds.sub(ref));
+    const l = line(lot, qty, proceeds, ref, "REF_31_12_2025", proceeds.sub(ref));
+    // gemist voordeel: hogere historische prijs, maar (een) aankoop niet als bewijsbaar aangeduid
+    const hyp = !hu && saleDate <= cfg.historicUntil ? historicUnit(lot, pool, cfg.historicMethod, true) : null;
+    if (hyp) {
+      const hist = money(qty.mul(hyp));
+      if (hist.gt(ref)) l.missed_historic_eur = proceeds.sub(ref).sub(Dec.max(ZERO, proceeds.sub(hist)));
+    }
+    return l;
   }
 
   function processSale(t, pool, cfg) {
@@ -179,6 +189,10 @@
       sale.reynders_deduction_eur = ded;
       if (ded.lt(t.reynders_eur)) sale.warnings.push("Reynders-aftrek beperkt tot de positieve meerwaarde van deze verkoop.");
     }
+    const missed = sum(sale.lines.map(l => l.missed_historic_eur));
+    if (missed.gt(ZERO))
+      sale.warnings.push(`Mogelijk voordeel: de historische aankoopprijs ligt hoger dan de waarde op 31/12/2025, maar de aankoop is niet als bewijsbaar aangeduid. ` +
+        `Met bewijs zou de meerwaarde ${missed.toFixed(2)} EUR lager zijn: vink 'Ik kan deze aankoopprijs bewijzen' aan bij de aankoop als je een bewijsstuk hebt.`);
     if (sale.lines.some(l => l.basis_used === "HISTORISCH"))
       sale.warnings.push("Historische aankoopprijs gebruikt: zelf inroepen in de aangifte en bewijsstukken bewaren.");
     sale.result_eur = sum(sale.lines.map(l => l.result_eur)).sub(sale.reynders_deduction_eur);

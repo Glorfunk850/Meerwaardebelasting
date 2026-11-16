@@ -104,6 +104,7 @@ class SaleLine:
     basis_used: BasisUsed
     result_eur: Decimal             # + meerwaarde / - minderwaarde
     note: str = ""
+    missed_historic_eur: Decimal = Decimal("0")  # lagere meerwaarde als de aankoop bewijsbaar was aangeduid
 
 
 @dataclass

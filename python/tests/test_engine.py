@@ -124,6 +124,40 @@ def test_historic_price_requires_proof():
     assert calculate(txs, {"S": D("120")}).sales[0].result_eur == D("5.00")
 
 
+def test_missed_historic_reported_without_proof():
+    # aankoop 150, fotowaarde 120, verkoop 125: zonder bewijs 5 meerwaarde, met bewijs 0 -> 5 gemist
+    txs = [buy(date(2023, 1, 1), "S", 1, 150), sell(date(2026, 6, 1), "S", 1, 125)]
+    sale = calculate(txs, {"S": D("120")}).sales[0]
+    assert sale.lines[0].missed_historic_eur == D("5.00")
+    assert any("Mogelijk voordeel" in w and "5.00 EUR" in w for w in sale.warnings)
+    # verkoop 200: met bewijs 50 i.p.v. 80 -> 30 gemist
+    sale = calculate([txs[0], sell(date(2026, 6, 1), "S", 1, 200)], {"S": D("120")}).sales[0]
+    assert sale.lines[0].missed_historic_eur == D("30.00")
+
+
+def test_no_missed_historic_when_not_applicable():
+    cases = [
+        ([buy(date(2023, 1, 1), "S", 1, 150, historic_proven=True), sell(date(2026, 6, 1), "S", 1, 125)], {}),  # al gebruikt
+        ([buy(date(2023, 1, 1), "S", 1, 100), sell(date(2026, 6, 1), "S", 1, 125)], {}),   # historisch lager
+        ([buy(date(2023, 1, 1), "S", 1, 150), sell(date(2026, 6, 1), "S", 1, 110)], {}),   # minderwaarde
+        ([buy(date(2023, 1, 1), "S", 1, 150), sell(date(2031, 1, 2), "S", 1, 125)], {"through": 2031}),  # na 2030
+    ]
+    for txs, kw in cases:
+        cfg = cfg_years(*range(2026, 2032)) if kw else None
+        sale = calculate(txs, {"S": D("120")}, cfg).sales[0]
+        assert sale.lines[0].missed_historic_eur == 0
+        assert not any("Mogelijk voordeel" in w for w in sale.warnings)
+
+
+def test_missed_historic_average_method():
+    # gemiddelde: één bewezen lot (100 @ 150) en één niet (100 @ 130) -> gemiddelde 140 niet bruikbaar
+    txs = [buy(date(2023, 1, 1), "S", 100, 150, historic_proven=True), buy(date(2024, 1, 1), "S", 100, 130),
+           sell(date(2026, 6, 1), "S", 100, 160)]
+    sale = calculate(txs, {"S": D("120")}, EngineConfig(historic_method=HistoricMethod.AVERAGE)).sales[0]
+    assert sale.result_eur == D("4000.00")
+    assert sale.lines[0].missed_historic_eur == D("2000.00")
+
+
 def test_historic_lower_than_ref_uses_ref():
     txs = [buy(date(2020, 1, 1), "S", 10, 10, historic_proven=True), sell(date(2026, 6, 1), "S", 10, 30)]
     assert calculate(txs, {"S": D("25")}).sales[0].result_eur == D("50.00")

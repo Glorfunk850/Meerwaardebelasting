@@ -22,7 +22,9 @@ kent delisting wel.
 - Tarief 10%; vrijstelling 2026 € 10.000 per persoon (latere jaren: geïndexeerd bedrag zelf toevoegen).
 - Overdracht van het ongebruikte deel van de eerste schijf van € 1.000, 5 jaar geldig, oudste eerst gebruikt.
 - Activa van vóór 2026: waarde op 31/12/2025; hogere bewezen historische prijs enkel voor verkopen t.e.m. 31/12/2030
-  en nooit tot een minderwaarde.
+  en nooit tot een minderwaarde. Bij opt-in houdt de broker in op de waarde van 31/12/2025; de hogere historische prijs
+  roep je zelf in via de aangifte (bron: FOD Financiën en bankinfo, nov. 2026; wettekst nog te bevestigen). Het rapport
+  meldt verkopen waar een hogere historische prijs mogelijk is maar de aankoop niet als bewijsbaar is aangeduid.
 - Minderwaarden enkel binnen hetzelfde jaar; geen overdracht van verlies.
 - FIFO; kosten en taksen niet aftrekbaar; vreemde munt tegen de koers op aankoop- en verkoopdatum.
 - Waarde op 31/12/2025 in vreemde munt: slotkoers in die munt, omgerekend tegen de wisselkoers van 31/12/2025
