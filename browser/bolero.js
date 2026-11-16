@@ -1,4 +1,4 @@
-/* Importer voor de Bolero-export "Cashbewegingen" (CSV).
+/* Importer voor de Bolero-export "Cashbewegingen" (Excel of CSV).
  * Zet aankopen, verkopen, inschrijvingen en dividenden om naar transacties voor de rekenkern.
  * Het bestand bevat geen ISIN's, splitsingen, overnames of overboekingen van effecten:
  * het importscherm laat de gebruiker daarom de posities op 31/12/2025 bevestigen. */
@@ -79,9 +79,66 @@
     return h.toString(16).padStart(16, "0");
   }
 
+  // ------------------------------------------------------------ Excel
+  /** Belgische notatie zoals in de CSV-export: "1.601,95" (met duizendtal) of "5,21". */
+  function beNum(v, thousands) {
+    let s = Math.abs(v) < 1e-6 && v !== 0 ? v.toFixed(12) : String(v);
+    if (/e/i.test(s)) s = v.toFixed(12);
+    const neg = s.startsWith("-"); if (neg) s = s.slice(1);
+    let [ip, fp = ""] = s.split(".");
+    if (thousands) { fp = (fp + "00").slice(0, Math.max(2, fp.length)); ip = ip.replace(/\B(?=(\d{3})+(?!\d))/g, "."); }
+    return (neg ? "-" : "") + ip + (fp ? "," + fp : "");
+  }
+  /** Werkblad van de Excel-export (rijen uit readXlsx) -> rijen met teksten zoals in de CSV-export. */
+  function rowsFromSheet(rows) {
+    const hIdx = rows.findIndex(r => r && r.some(c => String(c ?? "").trim() === "Datum transactie"));
+    if (hIdx < 0) return null;
+    const h = rows[hIdx].map(c => String(c ?? "").trim());
+    const dateCols = new Set(["Datum transactie", "Valutadatum"].map(k => h.indexOf(k)).filter(i => i >= 0));
+    const amountCol = h.indexOf("Bedrag");
+    const dmy = v => { const d = new Date(Math.round((Math.floor(v) - 25569) * 864e5)).toISOString(); return `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`; };
+    const width = Math.max(...rows.map(r => (r ? r.length : 0)));
+    return rows.map((r, i) => Array.from({ length: width }, (_, j) => {
+      const c = r ? r[j] : null;
+      if (c == null) return "";
+      if (i <= hIdx || typeof c !== "number") return String(c);
+      if (dateCols.has(j)) return dmy(c);
+      return beNum(c, j === amountCol);
+    }));
+  }
+  /** sheets: { naam: rijen } uit readXlsx -> resultaat van parseBolero, of null als het geen Bolero-export is. */
+  function parseBoleroSheets(sheets, opts = {}) {
+    for (const rows of Object.values(sheets)) {
+      const csvRows = rowsFromSheet(rows);
+      if (csvRows) return parseBoleroRows(csvRows, { fileName: "bolero.xlsx", ...opts });
+    }
+    return null;
+  }
+
+  /**
+   * Welke binnenkomende transacties staan er al? Op import-id, en voor Bolero ook op inhoud (type, datum, effect,
+   * aantal, prijs, bedrag), zodat CSV en Excel van dezelfde periode elkaar herkennen. -> [true/false per transactie]
+   */
+  function contentKey(t) {
+    const n = v => { try { return D(v ?? "0").toString(); } catch { return String(v); } };
+    return [t.type, t.trade_date, t.asset, n(t.quantity), n(t.price), t.type === "DIVIDEND" ? n(t.amount) : ""].join("|");
+  }
+  function duplicateFlags(existing, incoming) {
+    const ids = new Set(existing.map(t => t.import_id).filter(Boolean));
+    const free = new Map();
+    for (const t of existing) if (String(t.import_id || "").startsWith("b:")) { const k = contentKey(t); free.set(k, (free.get(k) || 0) + 1); }
+    const take = k => { const c = free.get(k) || 0; if (c > 0) free.set(k, c - 1); return c > 0; };
+    const flags = incoming.map(t => ids.has(t.import_id));
+    incoming.forEach((t, i) => { if (flags[i] && String(t.import_id || "").startsWith("b:")) take(contentKey(t)); });
+    incoming.forEach((t, i) => { if (!flags[i] && String(t.import_id || "").startsWith("b:")) flags[i] = take(contentKey(t)); });
+    return flags;
+  }
+
   // ------------------------------------------------------------ hoofdfunctie
-  function parseBolero(text, { owner = "ik", broker = "Bolero", fileName = "bolero.csv" } = {}) {
-    const rows = parseCsv(text);
+  function parseBolero(text, opts = {}) {
+    return parseBoleroRows(parseCsv(text), opts);
+  }
+  function parseBoleroRows(rows, { owner = "ik", broker = "Bolero", fileName = "bolero.csv" } = {}) {
     const hIdx = rows.findIndex(r => r.some(c => c.trim() === "Datum transactie"));
     if (hIdx < 0) throw new Error("Dit lijkt geen Bolero-export van cashbewegingen: de kolom 'Datum transactie' ontbreekt.");
     const h = rows[hIdx].map(c => c.trim());
@@ -96,7 +153,7 @@
     // regels met een datum, chronologisch (de export is aflopend; volgorde binnen een dag omkeren)
     const lines = [];
     rows.forEach((r, i) => {
-      const d = (r[C.date] || "").trim();
+      const d = String(r[C.date] ?? "").trim();
       if (/^\d\d\/\d\d\/\d{4}$/.test(d)) lines.push({ n: i + 1, r, date: isoDate(d), desc: (r[C.desc] || "").trim() });
     });
     lines.reverse();
@@ -251,9 +308,19 @@
     // wisselkoerswaarschuwingen enkel voor effecten die na 2025 nog meetellen
     const relevant = new Set([...held.map(h => h.asset), ...transactions.filter(t => t.trade_date >= "2026-01-01").map(t => t.asset)]);
     for (const w of fxWarnings) if (relevant.has(w.asset)) warnings.push(w.text + " Telt mee als dit lot na 2025 verkocht wordt en de historische prijs gebruikt wordt.");
-    return { transactions, skipped, warnings, refHints, assets, positions, fileName, rows: lines.length };
+    // verkopen zonder (voldoende) aankopen in deze export: de periode is te kort, tenzij die aankopen al eerder geïmporteerd zijn
+    const short = [];
+    for (const t of transactions) if (t.type === "SELL") {
+      const h = M.holdingsAt(transactions.filter(x => x !== t && x.trade_date <= t.trade_date), t.trade_date).find(x => x.asset === t.asset);
+      if (!h || h.quantity.lt(t.quantity)) short.push(t.asset);
+    }
+    const period = lines.length ? [lines[0].date, lines[lines.length - 1].date] : [null, null];
+    if (short.length)
+      warnings.unshift(`De export loopt van ${period[0]} tot ${period[1]} en bevat niet alle aankopen voor: ${[...new Set(short)].join(", ")}. ` +
+        "Importeer ook een export vanaf je eerste aankoop (of voeg de aankopen zelf toe), anders kan de meerwaarde niet berekend worden.");
+    return { transactions, skipped, warnings, refHints, assets, positions, fileName, rows: lines.length, period, incomplete: [...new Set(short)] };
   }
 
-  const api = { parseBolero, parseCsv, assetName, nameKey };
+  const api = { parseBolero, parseBoleroRows, parseBoleroSheets, rowsFromSheet, beNum, duplicateFlags, contentKey, parseCsv, assetName, nameKey };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.BOLERO = api;
 })(typeof window !== "undefined" ? window : globalThis);

@@ -38,6 +38,60 @@
     return { col: k => h.indexOf(k), rows: rows.slice(hIdx + 1).map((r, i) => ({ r: r || [], n: hIdx + i + 2 })) };
   }
 
+  // kolommen van de gecombineerde tabel (vroegere export "Trades": alles op één blad)
+  const COMBINED = ["transactiedatum", "aangepaste transactiedatum", "transactietype", "acties", "boekingsbedrag (eur)", "omrekeningskoers",
+    "totale kosten", "gerealiseerde w/v", "instrument", "instrumentsymbool", "instrument isin", "instrumentvaluta", "type", "openen/sluiten",
+    "traded quantity", "prijs", "verhandelde waarde", "transactie-id", "uitwisselingsbeschrijving", "corporate action-id", "_bron"];
+  const str = v => String(v ?? "").trim();
+
+  /**
+   * Standaardexport "Transacties" (sinds 2026): blad "Transacties" (één regel per boeking: bedrag, kosten, koers,
+   * dividenden, stortingen) en blad "_Transacties" (één regel per uitvoering: aantal en prijs, ook bij corporate actions).
+   * -> { rows: gecombineerde tabel zoals de vroegere export, cash: rijen van "Transacties" (dividenden e.d.), splits }
+   */
+  function combineTransactionsExport(all) {
+    let E = null, B = null, bName = null, eName = null;
+    for (const [name, rows] of all) {
+      if (!E) { E = tableFrom(rows, ["transactie-id", "instrument isin", "traded quantity", "prijs", "aangepaste transactiedatum"]); if (E) eName = name; }
+      if (!B) { B = tableFrom(rows, ["transactiedatum", "transactietype", "boekingsbedrag", "transactie-id"]); if (B) bName = name; }
+    }
+    if (!E || !B) return null;
+    const get = (T, r) => k => { const i = T.col(k); return i < 0 ? null : r[i]; };
+    const booked = new Map(), cash = [];
+    for (const { r, n } of B.rows) {
+      if (!r.some(v => v != null && v !== "")) continue;
+      const g = get(B, r), id = str(g("transactie-id"));
+      if (norm(g("transactietype")) === "transactie" && id && !booked.has(id)) booked.set(id, g);
+      else cash.push({ g, n, sheet: bName });
+    }
+    // corporate actions staan soms twee keer in "_Transacties" met hetzelfde transactie-id (bv. herboeking voor de
+    // meerwaardebelasting): enkel de vroegste telt
+    const execs = E.rows.filter(({ r }) => r.some(v => v != null && v !== "")).map(({ r, n }) => ({ g: get(E, r), n }));
+    const dateOf = g => X.excelDate(g("aangepaste transactiedatum") ?? g("trade execution date")) || "";
+    const first = new Map(), dupes = [];
+    for (const e of [...execs].sort((a, b) => dateOf(a.g).localeCompare(dateOf(b.g)))) {
+      const id = str(e.g("transactie-id")), ca = str(e.g("corporate action-id"));
+      if (ca && id && first.has(id)) { dupes.push(e); continue; }
+      if (id) first.set(id, e);
+    }
+    const rows = [COMBINED], splits = [];
+    for (const e of execs) {
+      if (dupes.includes(e)) continue;
+      const g = e.g, id = str(g("transactie-id")), ca = str(g("corporate action-id")), b = booked.get(id);
+      if (ca && !b && /splitsing|split/i.test(str(g("acties")))) { splits.push(e); continue; }
+      const v = {
+        "transactiedatum": b ? b("transactiedatum") : g("aangepaste transactiedatum"), "aangepaste transactiedatum": g("aangepaste transactiedatum"),
+        "transactietype": b ? b("transactietype") : "", "acties": str(g("acties")) || (b ? b("acties") : ""),
+        // zonder boeking: corporate action (bedrag = verhandelde waarde) of nog niet geboekt
+        "boekingsbedrag (eur)": b ? b("boekingsbedrag") : ca ? g("verhandelde waarde") : null,
+        "omrekeningskoers": b ? b("omrekeningskoers") : null, "totale kosten": b ? b("totale kosten") : 0,
+        "gerealiseerde w/v": b ? b("gerealiseerde w/v") : null, "corporate action-id": ca || null, "_bron": `${eName}:${e.n}`,
+      };
+      rows.push(COMBINED.map(k => (k in v ? v[k] : g(k))));
+    }
+    return { rows, cash, splits, dupes: dupes.length, bookedCcy: [...booked.values()].map(b => str(b("valuta")).toUpperCase()).filter(c => c && c !== "EUR") };
+  }
+
   /** sheets: { naam: rijen } (uit readXlsx) of { csv: rijen } */
   function parseSaxoSheets(sheets, { owner = "ik", broker = "Saxo", fileName = "saxo.xlsx" } = {}) {
     const all = Object.entries(sheets);
@@ -46,6 +100,8 @@
       T = tableFrom(rows, ["transactiedatum", "instrument isin", "traded quantity", "prijs"]);
       if (T) { sheetName = name; break; }
     }
+    const combo = T ? null : combineTransactionsExport(all);
+    if (combo) { T = tableFrom(combo.rows, ["transactiedatum", "instrument isin", "traded quantity", "prijs"]); sheetName = null; }
     if (!T) throw new Error("Dit lijkt geen Saxo-export van transacties: de kolommen 'Transactiedatum', 'Instrument ISIN', 'Traded Quantity' en 'Prijs' ontbreken.");
     const c = {
       date: T.col("transactiedatum"), tradeDate: T.col("aangepaste transactiedatum"), type: T.col("transactietype"),
@@ -53,6 +109,7 @@
       pl: T.col("gerealiseerde w/v"), instr: T.col("instrument"), symbol: T.col("instrumentsymbool"), isin: T.col("instrument isin"),
       ccy: T.col("instrumentvaluta"), kind: T.col("type"), openClose: T.col("openen/sluiten"), qty: T.col("traded quantity"),
       price: T.col("prijs"), value: T.col("verhandelde waarde"), txid: T.col("transactie-id"), exch: T.col("uitwisselingsbeschrijving"),
+      ca: T.col("corporate action-id"), src: T.col("_bron"),
     };
 
     // kostenopsplitsing uit "Bookings"
@@ -99,7 +156,7 @@
       return key;
     };
     for (const { r, n } of lines) {
-      const src = `${fileName}:${n}`;
+      const src = c.src >= 0 && r[c.src] ? `${fileName} (${r[c.src]})` : `${fileName}:${n}`;
       const type = norm(r[c.type]);
       const date = X.excelDate(r[c.tradeDate] ?? r[c.date]) || X.excelDate(r[c.date]);
       if (!date) { warnings.push(`${src}: geen geldige datum, overgeslagen.`); continue; }
@@ -141,7 +198,8 @@
         type: isSell ? "SELL" : "BUY", trade_date: date, asset, quantity: qty.toString(), price: price.toString(), currency: ccy,
         fx_per_eur: fx.toString(), fees: toCcy(costsEur.sub(taxEur)).toString(), taxes: toCcy(taxEur).toString(), owner, broker,
         historic_proven: !isSell && date < "2026-01-01", cost_known: true, reynders_eur: "0", amount: "0", split_ratio: null,
-        note: [name, ccy !== "EUR" ? `koers Saxo: 1 ${ccy} = ${rate} EUR` : ""].filter(Boolean).join("; "),
+        note: [name, ccy !== "EUR" ? `koers Saxo: 1 ${ccy} = ${rate} EUR` : "",
+          c.ca >= 0 && r[c.ca] ? `corporate action: ${String(r[c.action] || "").trim() || "zonder omschrijving"}` : ""].filter(Boolean).join("; "),
         import_id: "s:" + (txid ? `${txid}|${k}` : base + "|" + k), import_source: src,
       };
       const pl = num(r[c.pl]);
@@ -151,6 +209,12 @@
       if (tag) delistInfo.set(asset, { date: tag.date, name });
       firstDate = !firstDate || date < firstDate ? date : firstDate;
       lastDate = !lastDate || date > lastDate ? date : lastDate;
+    }
+
+    const withheld = {};
+    if (combo) {
+      const extra = corporateActions(combo, { out, warnings, skipped, assets, assetKey, owner, broker, fileName, sheets: all });
+      Object.assign(withheld, extra.withheld);
     }
 
     // delistings die Saxo in de naam markeert: voorstel als je op die datum nog stuks had
@@ -169,10 +233,113 @@
       warnings.push(`De export loopt van ${firstDate} tot ${lastDate}. Had je bij Saxo al effecten vóór ${firstDate}, exporteer dan een langere periode: anders ontbreken aankopen en klopt FIFO niet.`);
     if (out.some(t => t.saxo_result != null && t.trade_date >= "2026-01-01" && positions.some(p => p.asset === t.asset)))
       warnings.push("Saxo's 'Gerealiseerde W/V' is berekend op je aankoopprijs; voor effecten van vóór 2026 rekent de wet met de waarde op 31/12/2025. Verschillen zijn dus normaal.");
-    warnings.push("Saxo is een buitenlandse broker: er wordt geen Belgische meerwaardebelasting ingehouden. Je geeft deze meerwaarden zelf aan.");
-    return { source: "saxo", transactions: out, skipped, warnings, refHints: {}, assets, positions, delistings, fileName, rows: lines.length, period: [firstDate, lastDate] };
+    const wYears = Object.keys(withheld);
+    if (wYears.length) warnings.push(`Saxo hield meerwaardebelasting in: ${wYears.map(y => `${y}: € ${withheld[y]}`).join(", ")}. Dit bedrag wordt bij 'Ingehouden door broker' opgeteld.`);
+    else if (!combo) warnings.push("Deze export toont geen door Saxo ingehouden meerwaardebelasting. Controleer op je Saxo-overzicht of er iets ingehouden werd; zo niet, dan geef je deze meerwaarden zelf aan.");
+    return { source: "saxo", transactions: out, withheld, skipped, warnings, refHints: {}, assets, positions, delistings, fileName, rows: lines.length, period: [firstDate, lastDate] };
   }
   const Dmin = (a, b) => (a.lte(b) ? a : b);
+
+  /**
+   * Standaardexport: dividenden, splitsingen, andere corporate actions en ingehouden meerwaardebelasting.
+   * Voegt transacties toe aan `out` en geeft { withheld: { jaar: bedrag } } terug.
+   */
+  function corporateActions(combo, { out, warnings, skipped, assets, assetKey, owner, broker, fileName, sheets }) {
+    const count = k => { skipped[k] = (skipped[k] || 0) + 1; };
+    let Bk = null;
+    for (const [, rows] of sheets) if ((Bk = tableFrom(rows, ["amount type", "boekingsbedrag", "boekingsdatum"]))) break;
+    const bookings = Bk ? Bk.rows.map(({ r }) => k => { const i = Bk.col(k); return i < 0 ? null : r[i]; }) : [];
+    const nameOf = g => { const raw = str(g("instrument")), tag = delistedTag(raw); return (tag ? tag.name : raw).replace(/\s+/g, " "); };
+    const assetOf = g => {
+      const isin = str(g("instrument isin")).toUpperCase(), name = nameOf(g), key = assetKey(isin, name);
+      assets[key] ??= { currency: str(g("instrumentvaluta")).toUpperCase() || "EUR", name, isin, symbol: str(g("instrumentsymbool")), kind: str(g("type")) };
+      return key;
+    };
+    const base = { owner, broker, historic_proven: false, cost_known: true, reynders_eur: "0", fees: "0", taxes: "0", currency: "EUR", fx_per_eur: "1" };
+
+    // ingehouden meerwaardebelasting per jaar (negatief geboekt; een terugbetaling is positief)
+    const withheldD = {}, mwbRecords = new Set();
+    for (const g of bookings) {
+      if (norm(g("amount type")) !== "meerwaardebelasting") continue;
+      const date = X.excelDate(g("boekingsdatum")), amt = num(g("boekingsbedrag"));
+      if (!date || !amt) continue;
+      const y = date.slice(0, 4);
+      withheldD[y] = (withheldD[y] || ZERO).sub(amt);
+      if (str(g("bk record id"))) mwbRecords.add(str(g("bk record id")));
+    }
+    const withheld = Object.fromEntries(Object.entries(withheldD).filter(([, v]) => !v.isZero()).map(([y, v]) => [y, v.round(2).toString()]));
+
+    // dividenden: per corporate action netto (incl. terugboekingen)
+    const divs = new Map();
+    for (const { g, n, sheet } of combo.cash) {
+      const type = norm(g("transactietype")), action = str(g("acties")), src = `${fileName} (${sheet}:${n})`;
+      const date = X.excelDate(g("transactiedatum")), amt = num(g("boekingsbedrag"));
+      if (type === "storting/opname") { count("Stortingen en opnames"); continue; }
+      if (type !== "corporate action") { count(`Type '${str(g("transactietype")) || "leeg"}'`); continue; }
+      if (/dividend/i.test(action) && date && amt) {
+        const key = str(g("corporate action-id")) || `${str(g("instrument isin"))}|${date}`;
+        const d = divs.get(key) || { g, sum: ZERO, date: null, actions: new Set(), src };
+        d.sum = d.sum.add(amt); d.actions.add(action.replace(/\s*-\s*reversal$/i, ""));
+        if (amt.gt(ZERO) && (!d.date || date < d.date)) { d.date = date; d.g = g; d.src = src; }
+        divs.set(key, d);
+      } else if (!action && mwbRecords.has(str(g("bk record id")))) count("Ingehouden meerwaardebelasting (apart geboekt)");
+      else if (/splitsing|split|fractie/i.test(action)) count("Cash bij splitsingen (fracties)");
+      else if (/bod|overname|uitkoop/i.test(action)) count("Cash bij overnamebiedingen (verwerkt als verkoop)");
+      else if (/vermindering|terugbetaling/i.test(action)) {
+        count("Kapitaalverminderingen");
+        warnings.push(`${src}: ${action} ${nameOf(g)} op ${date}: € ${amt} ontvangen. Niet geïmporteerd: dit is geen verkoop. ` +
+          "Of een kapitaalvermindering de aanschaf- of fotowaarde verlaagt, regelt de wet niet uitdrukkelijk – laat dit nakijken.");
+      } else {
+        count("Andere corporate actions");
+        warnings.push(`${src}: corporate action '${action || "zonder omschrijving"}' (${nameOf(g)}, ${date}, € ${amt ?? "?"}) niet geïmporteerd. Controleer de betrokken positie.`);
+      }
+    }
+    for (const [key, d] of divs) {
+      if (!d.date || !d.sum.gt(ZERO)) { count("Teruggeboekte dividenden"); continue; }
+      out.push({ ...base, type: "DIVIDEND", trade_date: d.date, asset: assetOf(d.g), amount: d.sum.round(2).toString(), quantity: "0", price: "0",
+        split_ratio: null, note: `netto; ${[...d.actions].join(", ")}`, import_id: `s:div:${key}`, import_source: d.src });
+    }
+
+    // (omgekeerde) splitsingen: Saxo boekt een verkoop van de oude en een aankoop van de nieuwe stuks
+    const groups = new Map();
+    for (const e of combo.splits) { const k = str(e.g("corporate action-id")); groups.set(k, [...(groups.get(k) || []), e]); }
+    for (const [ca, list] of groups) {
+      const sells = list.filter(e => num(e.g("traded quantity"))?.lt(0)), buys = list.filter(e => num(e.g("traded quantity"))?.gt(0));
+      const src = `${fileName} (${list.map(e => `_Transacties:${e.n}`).join(", ")})`;
+      if (sells.length !== 1 || buys.length !== 1 || str(sells[0].g("instrument isin")) !== str(buys[0].g("instrument isin"))) {
+        count("Splitsingen niet herkend");
+        warnings.push(`${src}: splitsing (corporate action ${ca}) niet herkend – niet geïmporteerd. Voeg ze zelf toe als splitsing.`);
+        continue;
+      }
+      const oldQ = abs(num(sells[0].g("traded quantity"))), newQ = num(buys[0].g("traded quantity"));
+      const date = X.excelDate(buys[0].g("aangepaste transactiedatum")), asset = assetOf(buys[0].g), name = nameOf(buys[0].g);
+      // gangbare verhouding (1 nieuw voor n oud of n nieuw voor 1 oud); het restant is een fractie die in cash uitbetaald wordt
+      let ratio = null;
+      const o = Number(oldQ.toString()), nw = Number(newQ.toString());
+      if (nw < o) { const k = Math.round(o / nw); if (k > 1 && Math.floor(o / k) === nw) ratio = D(1).div(k); }
+      else { const k = Math.round(nw / o); if (k >= 1 && o * k === nw) ratio = D(k); }
+      let exact = true;
+      if (!ratio) { ratio = newQ.div(oldQ); exact = false; }
+      out.push({ ...base, type: "SPLIT", trade_date: date, asset, quantity: "0", price: "0", amount: "0", split_ratio: ratio.toString(),
+        note: `${name}; ${str(buys[0].g("acties")) || "splitsing"}: ${oldQ} → ${newQ}`, import_id: `s:split:${ca}`, import_source: src });
+      const frac = oldQ.mul(ratio).sub(newQ);
+      let msg = `${name}: ${str(buys[0].g("acties")) || "splitsing"} op ${date}, ${oldQ} → ${newQ} stuks, verwerkt als splitsing met verhouding ${ratio}`;
+      if (!exact) msg += " (geen gangbare verhouding gevonden: controleer)";
+      if (frac.gt(ZERO)) {
+        const cash = bookings.filter(g => str(g("corporate action-id")) === ca && /fractie/i.test(str(g("amount type"))));
+        const cashAmt = cash.reduce((s, g) => s.add(num(g("boekingsbedrag")) || ZERO), ZERO);
+        const cashDate = cash.map(g => X.excelDate(g("boekingsdatum"))).filter(Boolean).sort()[0];
+        const fDate = cashDate && cashDate > date ? cashDate : date;
+        out.push({ ...base, type: "SELL", trade_date: fDate, asset, quantity: frac.toString(), price: cashAmt.gt(ZERO) ? cashAmt.div(frac).round(6).toString() : "0",
+          amount: "0", split_ratio: null, note: `${name}; fractie na ${str(buys[0].g("acties")) || "splitsing"}, uitbetaald in cash`, import_id: `s:frac:${ca}`, import_source: src });
+        msg += `; fractie ${frac} verkocht voor € ${cashAmt.round(2)}` + (cashAmt.gt(ZERO) ? "" : " (geen cashbedrag gevonden: controleer)");
+      }
+      warnings.push(msg + ".");
+    }
+    if (combo.dupes) skipped["Dubbele regels bij corporate actions"] = combo.dupes;
+    if (combo.bookedCcy.length) warnings.push(`Je Saxo-rekening boekt in ${[...new Set(combo.bookedCcy)].join(", ")}: dividenden en kosten zijn als EUR overgenomen. Controleer ze.`);
+    return { withheld };
+  }
 
   /**
    * Eerder geïmporteerde transacties (zelfde import-id) die onder een andere naam staan, bv. de ISIN of
