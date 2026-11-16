@@ -13,7 +13,10 @@ CREATE TABLE IF NOT EXISTS assets (
     currency       TEXT NOT NULL DEFAULT 'EUR',
     listed         INTEGER NOT NULL DEFAULT 1,
     ref_value_eur  TEXT,                -- waarde per stuk op 31/12/2025
-    ref_source     TEXT NOT NULL DEFAULT ''
+    ref_source     TEXT NOT NULL DEFAULT '',
+    ref_price      TEXT,                -- slotkoers 31/12/2025 in de munt van het actief
+    ref_fx_per_eur TEXT,                -- koers 31/12/2025: 1 EUR = … munt
+    ref_eur_per_ccy TEXT                -- of: 1 munt = … EUR
 );
 CREATE TABLE IF NOT EXISTS transactions (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -26,6 +29,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     price           TEXT NOT NULL DEFAULT '0',
     currency        TEXT NOT NULL DEFAULT 'EUR',
     fx_per_eur      TEXT NOT NULL DEFAULT '1',
+    eur_per_ccy     TEXT,               -- koers in de andere richting (1 munt = … EUR); heeft voorrang
     fees            TEXT NOT NULL DEFAULT '0',
     taxes           TEXT NOT NULL DEFAULT '0',
     split_ratio     TEXT,
@@ -65,8 +69,20 @@ def connect(path: str | Path) -> sqlite3.Connection:
     return conn
 
 
+# kolommen die later bijkwamen: toevoegen aan bestaande databanken
+MIGRATIONS = [
+    ("transactions", "eur_per_ccy", "TEXT"),
+    ("assets", "ref_price", "TEXT"),
+    ("assets", "ref_fx_per_eur", "TEXT"),
+    ("assets", "ref_eur_per_ccy", "TEXT"),
+]
+
+
 def init(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    for table, col, typ in MIGRATIONS:
+        if col not in {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
     if conn.execute("SELECT COUNT(*) FROM tax_years").fetchone()[0] == 0:
         conn.execute(
             "INSERT INTO tax_years VALUES (2026, '0.10', '10000', '1000', 5, ?)",

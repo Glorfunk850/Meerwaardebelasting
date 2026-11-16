@@ -68,10 +68,12 @@
     <section id="tab-assets" class="tab">
       <div class="toolbar"><h2>Activa</h2></div>
       <p class="muted">Voor elk actief dat je vóór 1 januari 2026 verwierf, is de waarde per stuk op
-        31/12/2025 (slotkoers, in EUR) nodig. Activa worden automatisch toegevoegd bij een transactie.</p>
+        31/12/2025 (slotkoers) nodig. Voor een effect in een andere munt vul je de slotkoers in die munt in en de wisselkoers
+        op 31/12/2025 (1 EUR = … munt of 1 munt = … EUR, kies de richting); bij het bewaren wordt omgerekend naar EUR.
+        Activa worden automatisch toegevoegd bij een transactie.</p>
       <div class="table-wrap"><table id="asset-table">
         <thead><tr><th>ISIN/ticker</th><th>Naam</th><th>Type</th><th>Munt</th>
-          <th class="num">Waarde 31/12/2025 (EUR/stuk)</th><th>Bron</th><th></th></tr></thead>
+          <th class="num">Waarde 31/12/2025 per stuk</th><th>Bron</th><th></th></tr></thead>
         <tbody></tbody>
       </table></div>
       <p id="asset-empty" class="empty" hidden>Nog geen activa.</p>
@@ -152,7 +154,9 @@
         <label class="field g-amount">Bedrag <input name="amount" inputmode="decimal"></label>
         <label class="field g-split">Ratio (nieuwe stuks per oud stuk) <input name="split_ratio" inputmode="decimal" placeholder="4 = 4:1"></label>
         <label class="field g-ccy">Munt <input name="currency" value="EUR" maxlength="5"></label>
-        <label class="field g-ccy">Wisselkoers (1 EUR = … munt) <input name="fx_per_eur" value="1" inputmode="decimal"></label>
+        <div class="field g-ccy"><span>Wisselkoers <select name="fx_dir" aria-label="Richting wisselkoers">
+            <option value="PER_EUR">1 EUR = … munt</option><option value="EUR_PER">1 munt = … EUR</option></select></span>
+          <input name="fx" value="1" inputmode="decimal" aria-label="Wisselkoers"></div>
         <label class="field g-fees">Kosten <input name="fees" value="0" inputmode="decimal"></label>
         <label class="field g-fees">Taksen (bv. beurstaks) <input name="taxes" value="0" inputmode="decimal"></label>
         <label class="field g-reynders">Reynders-bedrag (EUR) <input name="reynders_eur" value="0" inputmode="decimal"></label>

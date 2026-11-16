@@ -108,3 +108,59 @@ def test_split_dividend_and_csv(client):
 def test_frontend_served(client):
     assert b"Meerwaardebelasting" in client.get("/").data
     assert client.get("/static/app.js").status_code == 200
+
+
+def test_fx_both_directions(client):
+    # 1 EUR = 1,25 USD (aankoop) en 1 USD = 0,80 EUR (verkoop): zelfde koers, dus 240 EUR meerwaarde
+    a = post_tx(client, type="BUY", trade_date="2026-01-05", asset="US", quantity="10", price="100",
+                currency="USD", fx_dir="PER_EUR", fx="1.25")
+    b = post_tx(client, type="SELL", trade_date="2026-06-01", asset="US", quantity="10", price="130",
+                currency="USD", fx_dir="EUR_PER", fx="0,80")
+    assert (a["fx_per_eur"], a["eur_per_ccy"]) == ("1.25", None)
+    assert (b["fx_per_eur"], b["eur_per_ccy"]) == ("1", "0.80")
+    assert client.get("/api/report").get_json()["sales"][0]["result_eur"] == "240.00"
+    # bestaande notatie via de API blijft werken
+    c = post_tx(client, type="BUY", trade_date="2026-01-06", asset="US", quantity="1", price="1",
+                currency="USD", eur_per_ccy="0.9")
+    assert c["eur_per_ccy"] == "0.9"
+    r = client.post("/api/transactions", json=dict(type="BUY", trade_date="2026-01-05", asset="E",
+                                                    quantity="1", price="1", fx_dir="EUR_PER", fx="0.9"))
+    assert r.status_code == 400 and "EUR" in r.get_json()["error"]
+
+
+def test_ref_value_in_foreign_currency(client):
+    post_tx(client, type="BUY", trade_date="2020-01-01", asset="US", quantity="10", price="100",
+            currency="USD", fx_per_eur="1.10")
+    assert client.put("/api/assets/US", json={"currency": "USD", "ref_price": "150",
+                                              "ref_fx_dir": "EUR_PER", "ref_fx": "0.8514"}).status_code == 200
+    a = next(x for x in client.get("/api/assets").get_json() if x["isin"] == "US")
+    assert (a["ref_value_eur"], a["ref_price"], a["ref_eur_per_ccy"], a["ref_fx_per_eur"]) == ("127.71", "150", "0.8514", None)
+    client.put("/api/assets/US", json={"currency": "USD", "ref_price": "150", "ref_fx_dir": "PER_EUR", "ref_fx": "1.1745"})
+    a = next(x for x in client.get("/api/assets").get_json() if x["isin"] == "US")
+    assert (a["ref_value_eur"], a["ref_fx_per_eur"], a["ref_eur_per_ccy"]) == ("127.7139208174", "1.1745", None)
+    r = client.put("/api/assets/US", json={"currency": "USD", "ref_price": "150", "ref_fx_dir": "PER_EUR", "ref_fx": ""})
+    assert r.status_code == 400
+
+
+def test_old_database_is_migrated(tmp_path):
+    import sqlite3
+    path = tmp_path / "oud.db"
+    c = sqlite3.connect(path)
+    c.executescript("""CREATE TABLE assets (isin TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '',
+        asset_type TEXT NOT NULL DEFAULT 'aandeel', currency TEXT NOT NULL DEFAULT 'EUR',
+        listed INTEGER NOT NULL DEFAULT 1, ref_value_eur TEXT, ref_source TEXT NOT NULL DEFAULT '');
+      CREATE TABLE transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL DEFAULT 'default',
+        broker TEXT NOT NULL DEFAULT '', trade_date TEXT NOT NULL, type TEXT NOT NULL, asset TEXT NOT NULL,
+        quantity TEXT NOT NULL DEFAULT '0', price TEXT NOT NULL DEFAULT '0', currency TEXT NOT NULL DEFAULT 'EUR',
+        fx_per_eur TEXT NOT NULL DEFAULT '1', fees TEXT NOT NULL DEFAULT '0', taxes TEXT NOT NULL DEFAULT '0',
+        split_ratio TEXT, historic_proven INTEGER NOT NULL DEFAULT 0, cost_known INTEGER NOT NULL DEFAULT 1,
+        reynders_eur TEXT NOT NULL DEFAULT '0', amount TEXT NOT NULL DEFAULT '0', note TEXT NOT NULL DEFAULT '');
+      INSERT INTO transactions (trade_date, type, asset, quantity, price, currency, fx_per_eur)
+        VALUES ('2026-01-05', 'BUY', 'US', '1', '10', 'USD', '1.25');""")
+    c.commit(); c.close()
+    app = create_app(path); app.testing = True
+    cl = app.test_client()
+    t = cl.get("/api/transactions").get_json()[0]
+    assert t["fx_per_eur"] == "1.25" and t["eur_per_ccy"] is None
+    post_tx(cl, type="SELL", trade_date="2026-02-01", asset="US", quantity="1", price="12", currency="USD", fx_dir="EUR_PER", fx="0.8")
+    assert cl.get("/api/report").get_json()["sales"][0]["result_eur"] == "1.60"
