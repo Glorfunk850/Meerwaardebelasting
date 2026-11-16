@@ -8,6 +8,7 @@
   const node = typeof module !== "undefined" && module.exports;
   const M = node ? require("./engine.js") : root.MWB;
   const X = node ? require("./xlsx.js") : root.XLSX_LITE;
+  const G = node ? require("./geld.js") : root.GELD;
   const { D, ZERO } = M;
 
   const norm = s => String(s ?? "").replace(/ /g, " ").replace(/\s+/g, " ").trim().toLowerCase();
@@ -110,7 +111,7 @@
     for (const { g, n } of spare) {
       const m = /^\s*(koop|verkoop)\s+(-?[\d.,]+)\s*@\s*([\d.,]+)/i.exec(str(g("acties")));
       const q = m && num(m[2]), p = m && num(m[3]);
-      if (!q || q.isZero() || !p) { unmatched.push(`${bName}:${n}`); continue; }
+      if (!q || q.isZero() || !p) { unmatched.push({ g, n, sheet: bName }); continue; }
       const qty = /^verkoop$/i.test(m[1]) ? (q.lt(0) ? q : q.neg()) : abs(q);
       const v = {
         "aangepaste transactiedatum": g("transactiedatum"), "boekingsbedrag (eur)": g("boekingsbedrag"), "traded quantity": qty.toString(),
@@ -119,7 +120,7 @@
       };
       rows.push(COMBINED.map(k => (k in v ? v[k] : g(k))));
     }
-    return { rows, cash, splits, dupes: dupes.length, unmatched,
+    return { rows, cash, splits, dupes, unmatched,
       bookedCcy: [...booked.values(), ...loose].map(b => str(b.g("valuta")).toUpperCase()).filter(c => c && c !== "EUR") };
   }
 
@@ -158,8 +159,9 @@
       }
     }
 
-    const out = [], warnings = [], skipped = {}, assets = {}, delistInfo = new Map();
+    const out = [], warnings = [], skipped = {}, assets = {}, delistInfo = new Map(), cash = [];
     const count = k => { skipped[k] = (skipped[k] || 0) + 1; };
+    const cashId = G.idMaker("s:cash:");
     const seen = new Map();
     let firstDate = null, lastDate = null;
     const lines = T.rows.filter(({ r }) => r.some(v => v != null && v !== "")).reverse(); // export is aflopend
@@ -202,7 +204,15 @@
       const type = norm(r[c.type]);
       const date = X.excelDate(r[c.tradeDate] ?? r[c.date]) || X.excelDate(r[c.date]);
       if (!date) { warnings.push(`${src}: geen geldige datum, overgeslagen.`); continue; }
-      if (type && type !== "transactie") { skipped[`Type '${r[c.type]}'`] = (skipped[`Type '${r[c.type]}'`] || 0) + 1; continue; }
+      if (type && type !== "transactie") {
+        // oude export: geldbewegingen staan op hetzelfde blad
+        const amt = num(r[c.amount]), action = String(r[c.action] ?? "").trim(), name = instrName(r);
+        const kind = type === "storting/opname" ? (amt && amt.lt(0) ? "OPNAME" : "STORTING") : "ANDERE";
+        cash.push({ kind, date, amount: amt ? amt.toString() : null, currency: "EUR", asset_name: name,
+          description: [String(r[c.type]).trim(), action].filter(Boolean).join(": "), status: "info", remark: "", owner, broker,
+          import_id: cashId(String(r[c.txid] ?? "").trim(), date, type, action, amt, name), import_source: src });
+        continue;
+      }
       const oc = norm(r[c.openClose]);
       const ownIsin = String(r[c.isin] ?? "").trim().toUpperCase();
       const symbol = String(r[c.symbol] ?? "").trim();
@@ -265,11 +275,18 @@
 
     const withheld = {};
     if (combo?.unmatched.length) {
-      skipped["Boekingen zonder aantal of prijs"] = combo.unmatched.length;
-      warnings.push(`${fileName} (${combo.unmatched.join(", ")}): transactie zonder uitvoering en zonder leesbare omschrijving – niet geïmporteerd. Voeg ze zelf toe.`);
+      for (const { g, n, sheet } of combo.unmatched) {
+        const date = X.excelDate(g("transactiedatum")), amt = num(g("boekingsbedrag")), action = str(g("acties"));
+        if (!date) continue;
+        cash.push({ kind: "ANDERE", date, amount: amt ? amt.toString() : null, currency: str(g("valuta")).toUpperCase() || "EUR",
+          asset_name: str(g("instrument")), description: `Transactie zonder aantal of prijs: ${action || "zonder omschrijving"}`, status: "info",
+          remark: "niet als transactie ingelezen: voeg ze zelf toe", warn: true, owner, broker,
+          import_id: cashId(str(g("transactie-id")), date, "unmatched", action, amt), import_source: `${fileName} (${sheet}:${n})` });
+      }
+      warnings.push(`${fileName} (${combo.unmatched.map(u => `${u.sheet}:${u.n}`).join(", ")}): transactie zonder uitvoering en zonder leesbare omschrijving – niet geïmporteerd. Voeg ze zelf toe.`);
     }
     if (combo) {
-      const extra = corporateActions(combo, { out, warnings, skipped, assets, assetKey, owner, broker, fileName, sheets: all });
+      const extra = corporateActions(combo, { out, cash, cashId, warnings, skipped, assets, assetKey, owner, broker, fileName, sheets: all });
       Object.assign(withheld, extra.withheld);
     }
 
@@ -292,7 +309,7 @@
     const wYears = Object.keys(withheld);
     if (wYears.length) warnings.push(`Saxo hield meerwaardebelasting in: ${wYears.map(y => `${y}: € ${withheld[y]}`).join(", ")}. Dit bedrag wordt bij 'Ingehouden door broker' opgeteld.`);
     else if (!combo) warnings.push("Deze export toont geen door Saxo ingehouden meerwaardebelasting. Controleer op je Saxo-overzicht of er iets ingehouden werd; zo niet, dan geef je deze meerwaarden zelf aan.");
-    return { source: "saxo", transactions: out, withheld, skipped, warnings, refHints: {}, assets, positions, delistings, fileName, rows: lines.length, period: [firstDate, lastDate] };
+    return { source: "saxo", transactions: out, cash, withheld, skipped, warnings, refHints: {}, assets, positions, delistings, fileName, rows: lines.length, period: [firstDate, lastDate] };
   }
   const Dmin = (a, b) => (a.lte(b) ? a : b);
 
@@ -300,7 +317,7 @@
    * Standaardexport: dividenden, splitsingen, andere corporate actions en ingehouden meerwaardebelasting.
    * Voegt transacties toe aan `out` en geeft { withheld: { jaar: bedrag } } terug.
    */
-  function corporateActions(combo, { out, warnings, skipped, assets, assetKey, owner, broker, fileName, sheets }) {
+  function corporateActions(combo, { out, cash, cashId, warnings, skipped, assets, assetKey, owner, broker, fileName, sheets }) {
     const count = k => { skipped[k] = (skipped[k] || 0) + 1; };
     let Bk = null;
     for (const [, rows] of sheets) if ((Bk = tableFrom(rows, ["amount type", "boekingsbedrag", "boekingsdatum"]))) break;
@@ -325,33 +342,47 @@
     }
     const withheld = Object.fromEntries(Object.entries(withheldD).filter(([, v]) => !v.isZero()).map(([y, v]) => [y, v.round(2).toString()]));
 
+    // geldbeweging ter info (telt niet mee voor de belasting)
+    const addCash = (kind, g, src, { status = "info", remark = "", warn = false, amount, date, description, currency } = {}) => {
+      const d = date || X.excelDate(g("transactiedatum")), amt = amount !== undefined ? amount : num(g("boekingsbedrag"));
+      if (!d) return;
+      const action = str(g("acties"));
+      cash.push({ kind, date: d, amount: amt ? amt.toString() : amt === null ? null : "0", currency: currency || str(g("valuta")).toUpperCase() || "EUR",
+        asset_name: nameOf(g), description: description ?? (action || str(g("transactietype"))), status, remark, ...(warn ? { warn } : {}), owner, broker,
+        import_id: cashId(str(g("transactie-id")), str(g("bk record id")), str(g("corporate action-id")), d, kind, action, amt), import_source: src });
+    };
+
     // dividenden: per corporate action netto (incl. terugboekingen)
     const divs = new Map();
     for (const { g, n, sheet } of combo.cash) {
       const type = norm(g("transactietype")), action = str(g("acties")), src = `${fileName} (${sheet}:${n})`;
       const date = X.excelDate(g("transactiedatum")), amt = num(g("boekingsbedrag"));
-      if (type === "storting/opname") { count("Stortingen en opnames"); continue; }
-      if (type !== "corporate action") { count(`Type '${str(g("transactietype")) || "leeg"}'`); continue; }
+      if (type === "storting/opname") { addCash(amt && amt.lt(0) ? "OPNAME" : "STORTING", g, src); continue; }
+      if (type !== "corporate action") { addCash("ANDERE", g, src, { description: [str(g("transactietype")), action].filter(Boolean).join(": ") }); continue; }
       if (/dividend/i.test(action) && date && amt) {
         const key = str(g("corporate action-id")) || `${str(g("instrument isin"))}|${date}`;
-        const d = divs.get(key) || { g, sum: ZERO, date: null, actions: new Set(), src };
-        d.sum = d.sum.add(amt); d.actions.add(action.replace(/\s*-\s*reversal$/i, ""));
+        const d = divs.get(key) || { g, sum: ZERO, date: null, actions: new Set(), src, lines: [] };
+        d.sum = d.sum.add(amt); d.actions.add(action.replace(/\s*-\s*reversal$/i, "")); d.lines.push({ g, src });
         if (amt.gt(ZERO) && (!d.date || date < d.date)) { d.date = date; d.g = g; d.src = src; }
         divs.set(key, d);
-      } else if (!action && mwbRecords.has(str(g("bk record id")))) count("Ingehouden meerwaardebelasting (apart geboekt)");
-      else if (/splitsing|split|fractie/i.test(action)) count("Cash bij splitsingen (fracties)");
-      else if (/bod|overname|uitkoop/i.test(action)) count("Cash bij overnamebiedingen (verwerkt als verkoop)");
+      } else if (!action && mwbRecords.has(str(g("bk record id"))))
+        addCash("MWB", g, src, { status: "verwerkt", remark: "al bij 'Ingehouden door broker'", description: "Ingehouden meerwaardebelasting" });
+      else if (/splitsing|split|fractie/i.test(action)) addCash("FRACTIE", g, src, { status: "verwerkt", remark: "al verwerkt als verkoop van de fractie" });
+      else if (/bod|overname|uitkoop/i.test(action)) addCash("BOD", g, src, { status: "verwerkt", remark: "al verwerkt als verkoop" });
       else if (/vermindering|terugbetaling/i.test(action)) {
-        count("Kapitaalverminderingen");
-        warnings.push(`${src}: ${action} ${nameOf(g)} op ${date}: € ${amt} ontvangen. Niet geïmporteerd: dit is geen verkoop. ` +
+        addCash("KAPVERM", g, src, { remark: "laat nakijken of dit de aanschaf- of fotowaarde verlaagt", warn: true });
+        warnings.push(`${src}: ${action} ${nameOf(g)} op ${date}: € ${amt} ontvangen. Niet als transactie geïmporteerd (wel als geldbeweging): dit is geen verkoop. ` +
           "Of een kapitaalvermindering de aanschaf- of fotowaarde verlaagt, regelt de wet niet uitdrukkelijk – laat dit nakijken.");
       } else {
-        count("Andere corporate actions");
-        warnings.push(`${src}: corporate action '${action || "zonder omschrijving"}' (${nameOf(g)}, ${date}, € ${amt ?? "?"}) niet geïmporteerd. Controleer de betrokken positie.`);
+        addCash("CA", g, src, { remark: "controleer de betrokken positie", warn: true });
+        warnings.push(`${src}: corporate action '${action || "zonder omschrijving"}' (${nameOf(g)}, ${date}, € ${amt ?? "?"}) niet als transactie geïmporteerd. Controleer de betrokken positie.`);
       }
     }
     for (const [key, d] of divs) {
-      if (!d.date || !d.sum.gt(ZERO)) { count("Teruggeboekte dividenden"); continue; }
+      if (!d.date || !d.sum.gt(ZERO)) {
+        for (const { g, src } of d.lines) addCash("DIV_TERUG", g, src, { remark: "dividend en terugboeking heffen elkaar op" });
+        continue;
+      }
       out.push({ ...base, type: "DIVIDEND", trade_date: d.date, asset: assetOf(d.g), amount: d.sum.round(2).toString(), quantity: "0", price: "0",
         split_ratio: null, note: `netto; ${[...d.actions].join(", ")}`, import_id: `s:div:${key}`, import_source: d.src });
     }
@@ -392,7 +423,13 @@
       }
       warnings.push(msg + ".");
     }
-    if (combo.dupes) skipped["Dubbele regels bij corporate actions"] = combo.dupes;
+    for (const e of combo.dupes) {
+      const v = num(e.g("verhandelde waarde"));
+      addCash("DUBBEL", e.g, `${fileName} (_Transacties:${e.n})`, { status: "verwerkt", remark: "kopie van een andere regel, telt niet",
+        date: X.excelDate(e.g("aangepaste transactiedatum") ?? e.g("trade execution date")), amount: v ?? null,
+        description: `${str(e.g("acties")) || "corporate action"} (${num(e.g("traded quantity")) ?? "?"} stuks)`,
+        currency: str(e.g("instrumentvaluta")).toUpperCase() || "EUR" });
+    }
     if (combo.bookedCcy.length) warnings.push(`Je Saxo-rekening boekt in ${[...new Set(combo.bookedCcy)].join(", ")}: dividenden en kosten zijn als EUR overgenomen. Controleer ze.`);
     return { withheld };
   }

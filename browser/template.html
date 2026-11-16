@@ -116,6 +116,30 @@ tr.clickable { cursor: pointer; } tr.clickable:hover td { background: #f3f7fb; }
 .alert.ok { background: #e8f4ee; color: var(--pos); border: 1px solid #b9dcc8; }
 tr.suspicious td { background: #fff8f8; }
 #import-dialog.saxo .col-div { display: none; }
+/* geldbewegingen (enkel ter info) */
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; background: var(--panel); }
+.seg button { border: 0; border-left: 1px solid var(--line); background: transparent; font: inherit; font-size: .88rem; padding: .45rem .7rem; cursor: pointer; color: var(--muted); min-height: 38px; }
+.seg button:first-child { border-left: 0; }
+.seg button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.seg .n { font-size: .74rem; opacity: .8; margin-left: .2rem; }
+.badge.DIVIDEND { background: #eef6e8; color: #3f6b14; }
+.badge.cash { background: #eef2f6; color: #44505e; }
+.badge.cash.in { background: #e8f4ee; color: var(--pos); }
+.badge.cash.out { background: #fdf0e6; color: #9a4700; }
+tr.info td { background: #fbfcfd; color: #44505e; }
+td.cash-what { white-space: normal; min-width: 15rem; }
+.cash-note { display: block; font-size: .74rem; color: var(--muted); white-space: normal; margin-top: .1rem; }
+.cash-note.done::before { content: "✓ "; color: var(--pos); }
+.cash-note.warn { color: var(--warn); }
+.cash-note.warn::before { content: "⚠ "; }
+#cash-summary { margin-bottom: .8rem; }
+#cash-summary tfoot td { font-weight: 700; background: #fafbfc; border-top: 2px solid var(--line); }
+.imp-list { list-style: none; padding: 0; margin: .3rem 0 0; }
+.imp-list li { display: flex; gap: .6rem; align-items: baseline; padding: .3rem 0; border-top: 1px solid var(--line); font-size: .9rem; }
+.imp-list li:first-child { border-top: 0; }
+.imp-list .cnt { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 2.2rem; text-align: right; }
+.imp-list .grow { flex: 1; }
+.imp-sub { font-size: .76rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: .8rem 0 .1rem; font-weight: 600; }
 .pos { color: var(--pos); } .neg { color: var(--neg); }
 
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; margin-top: .5rem; }
@@ -213,13 +237,24 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
         <label class="btn ghost">Export importeren (Bolero/Saxo)<input type="file" id="import-bolero" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></label>
         <button class="btn primary" data-action="new-tx">+ Nieuwe transactie</button></div></div>
     <div class="filters">
+      <label>Tonen <span class="seg" id="f-show" role="group" aria-label="Tonen">
+        <button type="button" data-show="tx">Transacties<span class="n"></span></button>
+        <button type="button" data-show="cash">Geldbewegingen<span class="n"></span></button>
+        <button type="button" data-show="all" class="on">Alles<span class="n"></span></button></span></label>
       <label>Jaar <select id="f-year"><option value="">Alle</option></select></label>
       <label>Eigenaar <select id="f-owner"><option value="">Alle</option></select></label>
+      <label>Soort <select id="f-kind"><option value="">Alle</option></select></label>
       <label>Actief <input id="f-asset" placeholder="naam" size="12"></label>
       <label>Bewijs <select id="f-proof"><option value="">Alle</option><option value="met">Met bewijs</option>
         <option value="zonder">Bewijs ontbreekt</option></select></label>
     </div>
     <p id="proof-missing" class="hint" hidden></p>
+    <div id="cash-summary" hidden>
+      <div class="table-wrap"><table><thead><tr><th>Geldoverzicht per jaar (info)</th><th class="num">Gestort</th><th class="num">Opgenomen</th>
+        <th class="num">Netto inbreng</th><th class="num">Dividend (netto)</th><th class="num">Kapitaalvermindering</th><th class="num">Ingehouden MWB</th></tr></thead>
+        <tbody></tbody><tfoot></tfoot></table></div>
+      <p class="hint" id="cash-summary-hint"></p>
+    </div>
     <div class="table-wrap"><table id="tx-table"><thead><tr>
       <th>Datum</th><th>Type</th><th>Actief</th><th class="num">Aantal</th><th class="num">Prijs / bedrag</th>
       <th>Munt</th><th>Eigenaar</th><th>Broker</th><th></th></tr></thead><tbody></tbody></table></div>
@@ -344,7 +379,10 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
 <dialog id="import-dialog" style="width:min(820px,96vw)"><div class="body">
   <h3 id="imp-title">Export importeren</h3>
   <p id="imp-summary"></p>
-  <details><summary class="small muted">Overgeslagen regels (geldbewegingen zonder effect op de belasting)</summary><ul id="imp-skipped" class="small"></ul></details>
+  <details id="imp-cash-wrap" style="margin-top:.6rem"><summary class="small"><strong>Geldbewegingen (<span id="imp-cash-count"></span>): enkel ter info, tellen niet mee voor de belasting</strong></summary>
+    <div id="imp-cash"></div>
+    <label class="check" style="margin-top:.6rem"><input type="checkbox" id="imp-cash-add" checked> Geldbewegingen mee importeren</label></details>
+  <details id="imp-skipped-wrap"><summary class="small muted">Niet geïmporteerd</summary><ul id="imp-skipped" class="small"></ul></details>
   <label class="field" style="max-width:240px;margin-top:.8rem">Eigenaar <input id="imp-owner" list="owner-list"></label>
   <h3>Posities op 31/12/2025 controleren</h3>
   <p class="hint">De export bevat geen splitsingen, overnames, naamswijzigingen of effecten die je van een andere bank overzette.
@@ -366,6 +404,15 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     <ul id="imp-warnings" class="small"></ul></details>
   <p class="hint">Aankopen van vóór 2026 worden gemarkeerd als "historische prijs bewijsbaar": de afrekeningen van je broker gelden als bewijs. Pas dat per transactie aan als nodig.</p>
   <div class="actions"><button class="btn ghost" id="imp-cancel">Annuleren</button><button class="btn primary" id="imp-confirm">Importeren</button></div>
+</div></dialog>
+
+<dialog id="cash-dialog" style="width:min(520px,94vw)"><div class="body">
+  <h3 id="cash-title">Geldbeweging</h3>
+  <p class="hint" style="margin-top:0">Enkel ter info: geldbewegingen tellen nooit mee voor de meerwaardebelasting.</p>
+  <dl class="kv" id="cash-details"></dl>
+  <label class="field" style="margin-top:.8rem">Notitie <input id="cash-note"></label>
+  <div class="actions"><button type="button" class="btn danger left" id="cash-delete">Verwijderen</button>
+    <button type="button" class="btn ghost" id="cash-cancel">Annuleren</button><button type="button" class="btn primary" id="cash-save">Bewaren</button></div>
 </div></dialog>
 
 <dialog id="confirm-dialog" style="width:min(420px,92vw)"><div class="body">
@@ -391,6 +438,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
 <datalist id="broker-list"><option value="Bolero"><option value="Saxo"></datalist>
 
 <script>/*ENGINE*/</script>
+<script>/*GELD*/</script>
 <script>/*BOLERO*/</script>
 <script>/*XLSX*/</script>
 <script>/*SAXO*/</script>

@@ -63,13 +63,14 @@
 
   const TRADE = /^(Aankoop Online|Aankoop|Verkoop Online|Verkoop|Inschrijving)\s+(.+)$/i;
   const DIVIDEND = /^Uitbetaling (dividenden|effecten)\s+(.+)$/i;
+  // geldbewegingen zonder effect op de belasting -> soort (zie geld.js)
   const SKIP = [
-    [/^Wisseltransactie/i, "Wisseltransacties"],
-    [/^Overschrijving naar klant/i, "Overschrijvingen naar je rekening"],
-    [/^Provisionering rekening klant/i, "Stortingen op je Bolero-rekening"],
-    [/^Terugstorting/i, "Terugstortingen (kosten)"],
-    [/^Taksrecuperatie/i, "Recuperatie buitenlandse taks"],
-    [/^Kost igv corporate actions/i, "Kosten corporate actions"],
+    [/^Wisseltransactie/i, "WISSEL"],
+    [/^Overschrijving naar klant/i, "OPNAME"],
+    [/^Provisionering rekening klant/i, "STORTING"],
+    [/^Terugstorting/i, "TERUGSTORTING"],
+    [/^Taksrecuperatie/i, "TAKSRECUP"],
+    [/^Kost igv corporate actions/i, "KOSTEN"],
   ];
 
   /** FNV-1a 64-bit als korte, stabiele sleutel voor herimport. */
@@ -183,7 +184,13 @@
       return best;
     }
 
-    const out = [], warnings = [], fxWarnings = [], skipped = {}, refHints = {}, assets = {};
+    const out = [], warnings = [], fxWarnings = [], skipped = {}, refHints = {}, assets = {}, cash = [];
+    const addCash = (kind, l, { status = "info", remark = "", warn = false, importId: id } = {}) => {
+      const amount = bnum(l.r[C.amount]);
+      cash.push({ kind, date: l.date, amount: amount == null ? null : amount.toString(), currency: (l.r[C.ccy] || "").trim() || "EUR",
+        asset_name: "", description: l.desc, status, remark, ...(warn ? { warn } : {}), owner, broker, import_id: id || "c" + importId(l), import_source: `${fileName}:${l.n}` });
+    };
+    const lineOf = new Map(); // transactie -> exportregel (voor geannuleerde boekingen)
     const seen = new Map();
     const importId = l => {
       const base = `bolero|${l.date}|${l.desc}|${l.r[C.amount]}|${l.r[C.qty]}|${l.r[C.price]}`;
@@ -239,7 +246,7 @@
         const pl = bnum(l.r[C.pl]), mwb = bnum(l.r[C.mwb]);
         if (isSell && pl != null) { t.bolero_result = pl.toString(); if (mwb != null) t.bolero_tax = mwb.toString(); }
         assets[id] ??= { currency: ccy };
-        out.push(t);
+        out.push(t); lineOf.set(t, l);
       } else if ((m = DIVIDEND.exec(l.desc))) {
         if (amount == null) continue;
         const name = m[2];
@@ -249,20 +256,20 @@
         if (amtCcy !== "EUR") { const f = fxFor(amtCcy, l.date); fx = f ? f.rate.round(6) : null; }
         if (fx === null) { warnings.push(`${src}: dividend ${name} in ${amtCcy} zonder wisselkoers, overgeslagen.`); continue; }
         const rv = bnum(l.r[C.rv]);
-        out.push({
+        const dv = {
           type: "DIVIDEND", trade_date: l.date, asset: id, amount: amount.toString(), currency: amtCcy, fx_per_eur: fx.toString(),
           quantity: "0", price: "0", fees: "0", taxes: "0", owner, broker, historic_proven: false, cost_known: true, reynders_eur: "0",
           split_ratio: null, note: `netto${rv ? `; roerende voorheffing € ${rv}` : ""}${m[1].toLowerCase() === "effecten" ? "; coupon/recht" : ""}`,
           import_id: importId(l), import_source: src,
-        });
+        };
+        out.push(dv); lineOf.set(dv, l);
       } else if (/^Inboeking corporate action/i.test(l.desc)) {
-        skipped["Corporate actions"] = (skipped["Corporate actions"] || 0) + 1;
+        addCash("CA", l, { remark: "controleer de betrokken posities", warn: true });
         warnings.push(`${src}: ${l.desc} – corporate action (bv. overname of omruiling) staat niet volledig in de export. Controleer de betrokken posities.`);
       } else {
         const s = SKIP.find(([re]) => re.test(l.desc));
-        const label = s ? s[1] : "Onbekende regels";
-        skipped[label] = (skipped[label] || 0) + 1;
-        if (!s) warnings.push(`${src}: onbekend type '${l.desc}', overgeslagen.`);
+        addCash(s ? s[1] : "ANDERE", l, s ? {} : { remark: "onbekend type", warn: true });
+        if (!s) warnings.push(`${src}: onbekend type '${l.desc}', niet als transactie ingelezen (wel als geldbeweging).`);
       }
     }
 
@@ -273,12 +280,16 @@
         ? t.type === "DIVIDEND" && D(t.amount).eq(want)
         : t.type === (s.isSell ? "SELL" : "BUY") && D(t.quantity).eq(s.qty)
           && (D(t.price).mul(t.quantity).add(t.fees).sub(want).round(2).isZero() || D(t.price).mul(t.quantity).sub(t.fees).sub(want).round(2).isZero())));
-      if (idx >= 0) out[idx]._cancelled = true;
-      else warnings.push(`${fileName}:${s.l.n}: correctie '${s.l.desc}' zonder overeenkomstige boeking, overgeslagen.`);
+      if (idx >= 0) {
+        const t = out[idx]; t._cancelled = true;
+        addCash("STORNO", lineOf.get(t), { status: "verwerkt", remark: "geannuleerd door een correctieboeking", importId: "c" + t.import_id });
+        addCash("STORNO", s.l, { status: "verwerkt", remark: "correctieboeking" });
+      } else {
+        addCash("STORNO", s.l, { remark: "correctie zonder overeenkomstige boeking", warn: true });
+        warnings.push(`${fileName}:${s.l.n}: correctie '${s.l.desc}' zonder overeenkomstige boeking, niet als transactie ingelezen (wel als geldbeweging).`);
+      }
     }
     const transactions = out.filter(t => !t._cancelled);
-    const cancelled = out.length - transactions.length;
-    if (cancelled) skipped["Geannuleerde boekingen (storno)"] = cancelled * 2;
 
     // fotowaarde afleiden uit Bolero's eigen resultaat bij verkopen in 2026+
     // (enkel als het volledig verkochte deel uit lots van vóór 2026 komt)
@@ -318,7 +329,7 @@
     if (short.length)
       warnings.unshift(`De export loopt van ${period[0]} tot ${period[1]} en bevat niet alle aankopen voor: ${[...new Set(short)].join(", ")}. ` +
         "Importeer ook een export vanaf je eerste aankoop (of voeg de aankopen zelf toe), anders kan de meerwaarde niet berekend worden.");
-    return { transactions, skipped, warnings, refHints, assets, positions, fileName, rows: lines.length, period, incomplete: [...new Set(short)] };
+    return { transactions, cash, skipped, warnings, refHints, assets, positions, fileName, rows: lines.length, period, incomplete: [...new Set(short)] };
   }
 
   const api = { parseBolero, parseBoleroRows, parseBoleroSheets, rowsFromSheet, beNum, duplicateFlags, contentKey, parseCsv, assetName, nameKey };

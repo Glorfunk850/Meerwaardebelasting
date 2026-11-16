@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Tests
-        run: node --test engine.test.js bolero.test.js saxo.test.js bewijs.test.js pdf.test.js
+        run: node --test engine.test.js bolero.test.js saxo.test.js bewijs.test.js pdf.test.js geld.test.js
       - name: index.html is up to date with the sources
         run: |
           python3 build.py
