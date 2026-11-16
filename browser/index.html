@@ -12,7 +12,7 @@
 :root {
   --bg: #f5f6f8; --panel: #fff; --ink: #1b2430; --muted: #5d6978; --line: #e2e6eb;
   --accent: #1f5f8b; --accent-soft: #e7f0f8; --pos: #146c43; --neg: #b02a37;
-  --warn-bg: #fff6e0; --warn: #7d5300; --radius: 12px;
+  --warn-bg: #fff6e0; --warn: #7d5300; --radius: 12px; --page: 1440px;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color-scheme: light;
 }
@@ -24,16 +24,16 @@ h3 { font-size: 1.02rem; margin: 1.4rem 0 .6rem; }
 a { color: var(--accent); }
 
 .top { background: var(--panel); border-bottom: 1px solid var(--line); padding: .75rem 1rem 0; position: sticky; top: 0; z-index: 5; }
-.brand { display: flex; gap: .65rem; align-items: center; max-width: 1100px; margin: 0 auto; }
+.brand { display: flex; gap: .65rem; align-items: center; max-width: var(--page); margin: 0 auto; }
 .logo { width: 34px; height: 34px; border-radius: 9px; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 700; flex: none; }
 .brand h1 { font-size: 1.05rem; }
 .sub { margin: 0; color: var(--muted); font-size: .78rem; }
-.tabs { display: flex; gap: .1rem; margin: .5rem auto 0; overflow-x: auto; max-width: 1100px; scrollbar-width: none; }
+.tabs { display: flex; gap: .1rem; margin: .5rem auto 0; overflow-x: auto; max-width: var(--page); scrollbar-width: none; }
 .tabs a { padding: .6rem .8rem; color: var(--muted); border-bottom: 2px solid transparent; text-decoration: none; white-space: nowrap; position: relative; }
 .tabs a.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
 .dot { position: absolute; top: .45rem; right: .25rem; width: 7px; height: 7px; border-radius: 50%; background: var(--neg); }
 
-.notice { max-width: 1100px; margin: 0 auto; padding: .5rem 1rem 0; display: flex; flex-direction: column; gap: .35rem; }
+.notice { max-width: var(--page); margin: 0 auto; padding: .5rem 1rem 0; display: flex; flex-direction: column; gap: .35rem; }
 .disclaimer, .storage { font-size: .82rem; padding: .45rem .7rem; border-radius: 8px; }
 .disclaimer { background: var(--warn-bg); color: var(--warn); }
 .storage { background: #eef2f6; color: var(--muted); }
@@ -41,7 +41,7 @@ a { color: var(--accent); }
 .storage.warn { background: var(--warn-bg); color: var(--warn); }
 .storage:empty { display: none; }
 
-main { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+main { max-width: var(--page); margin: 0 auto; padding: 1rem; }
 .tab { display: none; } .tab.active { display: block; }
 .toolbar { display: flex; justify-content: space-between; align-items: center; gap: .5rem; margin-bottom: .7rem; flex-wrap: wrap; }
 
@@ -82,6 +82,28 @@ td input, td select { width: 100%; min-width: 100px; font-size: 14px; }
 .ref-fx input[readonly] { opacity: .75; }
 .ref-fx-rate { display: grid; grid-template-columns: auto 1fr; gap: .25rem; }
 .ref-fx-rate select { min-width: 0; width: auto; font-size: .78rem; }
+/* Activa: compacte tabel zodat meer rijen en alle kolommen op het scherm passen */
+#asset-table { font-size: .86rem; }
+#asset-table th, #asset-table td { padding: .2rem .35rem; vertical-align: middle; }
+#asset-table th { white-space: normal; line-height: 1.2; }
+#asset-table th:first-child, #asset-table td:first-child { padding-left: .6rem; }
+#asset-table .badge { font-size: .68rem; padding: .02rem .35rem; }
+#asset-table td input, #asset-table td select { padding: .2rem .35rem; border-radius: 6px; min-width: 0; font-size: 13.5px; }
+#asset-table input[name=isin] { width: 8.8rem; }
+#asset-table select[name=asset_type] { width: 6.2rem; }
+#asset-table input[name=currency] { width: 3.4rem; }
+#asset-table input[name=ref_value_eur], #asset-table input[name=ref_price] { width: 6.6rem; }
+#asset-table input[name=ref_source] { width: 100%; min-width: 7rem; }
+#asset-table .ref-fx { grid-template-columns: auto auto; gap: .1rem .3rem; min-width: 0; }
+#asset-table .ref-fx label { font-size: .68rem; color: var(--muted); line-height: 1.15; }
+#asset-table .ref-fx-rate { grid-column: 1 / -1; grid-row: 2; }
+#asset-table .ref-fx-rate input { width: 100%; }
+#asset-table .ref-fx label:last-child { grid-column: 2; grid-row: 1; }
+#asset-table td.actions-cell { width: 1%; }
+#asset-table td.actions-cell .btn { min-height: 26px; padding: .1rem .5rem; }
+details.intro { margin: 0 0 .7rem; }
+details.intro summary { cursor: pointer; color: var(--accent); font-size: .88rem; }
+details.intro p { margin: .4rem 0 0; }
 td input.w-sm { min-width: 64px; } td input.w-xs { min-width: 48px; }
 td.actions-cell { text-align: right; }
 tr.clickable { cursor: pointer; } tr.clickable:hover td { background: #f3f7fb; }
@@ -210,9 +232,10 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     <div class="toolbar"><h2>Activa</h2>
       <label class="check" id="asset-closed-toggle" hidden><input type="checkbox" id="asset-show-closed">
         Toon ook activa die niet meer in portefeuille zitten, ook die je uit de lijst verwijderde (<span id="asset-closed-count">0</span>)</label></div>
+    <details class="intro"><summary>Uitleg: welke waarde vul je in?</summary>
     <p class="muted">Voor elk actief dat je vóór 1 januari 2026 verwierf, is de waarde per stuk op 31/12/2025 nodig
       (slotkoers). Voor effecten in een andere munt vul je de slotkoers in die munt in en de wisselkoers op 31/12/2025
-      (1 EUR = … munt of 1 munt = … EUR, kies de richting), bv. de koers die je broker gebruikt; de tool rekent om naar EUR. De koers vul je per effect zelf in. Activa worden automatisch toegevoegd bij een transactie.</p>
+      (1 EUR = … munt of 1 munt = … EUR, kies de richting), bv. de koers die je broker gebruikt; de tool rekent om naar EUR. De koers vul je per effect zelf in. Activa worden automatisch toegevoegd bij een transactie.</p></details>
     <div id="asset-missing" class="alert warn" hidden></div>
     <div class="table-wrap"><table id="asset-table"><thead><tr><th>Naam</th><th>ISIN</th><th>Type</th><th>Munt</th>
       <th class="num">Waarde 31/12/2025 per stuk</th><th>Bron</th><th></th></tr></thead><tbody></tbody></table></div>
