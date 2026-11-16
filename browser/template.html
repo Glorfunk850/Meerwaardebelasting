@@ -77,6 +77,9 @@ th { background: #fafbfc; font-weight: 600; color: var(--muted); font-size: .78r
 tr:last-child td { border-bottom: 0; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 td input, td select { width: 100%; min-width: 100px; font-size: 14px; }
+.ref-fx { display: grid; gap: .25rem; min-width: 150px; }
+.ref-fx label { display: grid; font-size: .78rem; text-align: left; }
+.ref-fx input[readonly] { opacity: .75; }
 td input.w-sm { min-width: 64px; } td input.w-xs { min-width: 48px; }
 td.actions-cell { text-align: right; }
 tr.clickable { cursor: pointer; } tr.clickable:hover td { background: #f3f7fb; }
@@ -203,10 +206,11 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
       <label class="check" id="asset-closed-toggle" hidden><input type="checkbox" id="asset-show-closed">
         Toon ook activa die niet meer in portefeuille zitten (<span id="asset-closed-count">0</span>)</label></div>
     <p class="muted">Voor elk actief dat je vóór 1 januari 2026 verwierf, is de waarde per stuk op 31/12/2025 nodig
-      (slotkoers, omgerekend naar EUR). Activa worden automatisch toegevoegd bij een transactie.</p>
+      (slotkoers). Voor effecten in een andere munt vul je de slotkoers in die munt in en de wisselkoers op 31/12/2025
+      (ECB-referentiekoers, 1 EUR = … munt); de tool rekent om naar EUR. Activa worden automatisch toegevoegd bij een transactie.</p>
     <div id="asset-missing" class="alert warn" hidden></div>
     <div class="table-wrap"><table id="asset-table"><thead><tr><th>Naam</th><th>ISIN</th><th>Type</th><th>Munt</th>
-      <th class="num">Waarde 31/12/2025 (EUR/stuk)</th><th>Bron</th><th></th></tr></thead><tbody></tbody></table></div>
+      <th class="num">Waarde 31/12/2025 per stuk</th><th>Bron</th><th></th></tr></thead><tbody></tbody></table></div>
     <p id="asset-empty" class="empty" hidden>Nog geen activa.</p>
   </section>
 
@@ -314,7 +318,9 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
   <h3>Posities op 31/12/2025 controleren</h3>
   <p class="hint">De export bevat geen splitsingen, overnames, naamswijzigingen of effecten die je van een andere bank overzette.
     Vink uit wat je op 31/12/2025 niet meer had; de tool boekt het dan uit vóór 2026 (geen belastbaar moment).
-    Vul de slotkoers op 31/12/2025 in (EUR per stuk) als je die kent; ze is pas nodig wanneer je het effect verkoopt.</p>
+    Vul de slotkoers op 31/12/2025 per stuk in als je die kent; ze is pas nodig wanneer je het effect verkoopt.
+    Voor effecten in een andere munt vul je de slotkoers in die munt in, plus de ECB-wisselkoers van 31/12/2025
+    (1 EUR = … munt); de tool rekent om naar EUR. Eén keer de koers invullen volstaat: ze wordt overgenomen bij de andere effecten in dezelfde munt.</p>
   <div class="table-wrap"><table id="imp-positions"><thead><tr><th>Bezit</th><th>Effect</th><th class="num">Aantal</th>
     <th class="col-div">Laatste dividend</th><th class="num">Waarde 31/12/2025</th></tr></thead><tbody></tbody></table></div>
   <div id="imp-delist-wrap" hidden>

@@ -331,12 +331,21 @@
     return [...out.values()].filter(h => h.quantity.gt(ZERO));
   }
 
+  /** Waarde 31/12/2025 per stuk in EUR uit de slotkoers in vreemde munt en de wisselkoers van
+   *  31/12/2025 (ECB-notatie: 1 EUR = fxPerEur eenheden munt); afgerond op 10 decimalen. */
+  function refValueFromCurrency(price, fxPerEur) {
+    const p = D(price), fx = D(fxPerEur);
+    if (!fx.gt(ZERO)) throw new Error("Wisselkoers op 31/12/2025 moet groter dan 0 zijn.");
+    if (p.lt(ZERO)) throw new Error("Slotkoers op 31/12/2025 mag niet negatief zijn.");
+    return p.div(fx).round(10);
+  }
+
   function compareMethods(transactions, refValues, cfg, withheld, throughYear) {
     const res = {};
     for (const m of ["FIFO", "GEMIDDELD"]) res[m] = calculate(transactions, refValues, { ...cfg, historicMethod: m }, withheld, throughYear);
     return res;
   }
 
-  const api = { Dec, D, ZERO, ONE, money, TxType, DelistModes, ACQ, defaultConfig, calculate, compareMethods, holdingsAt };
+  const api = { Dec, D, ZERO, ONE, money, TxType, DelistModes, ACQ, defaultConfig, calculate, compareMethods, holdingsAt, refValueFromCurrency };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.MWB = api;
 })(typeof window !== "undefined" ? window : globalThis);

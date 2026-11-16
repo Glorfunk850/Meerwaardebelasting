@@ -15,6 +15,7 @@ from engine import (
     TxType,
     calculate,
     compare_methods,
+    ref_value_from_currency,
 )
 
 
@@ -343,3 +344,18 @@ def test_ref_value_only_needed_for_lots_sold_after_2025():
     assert calculate(txs, {}).sales[0].result_eur == D("2.00")
     # nog open eind 2025 maar niet verkocht: ook geen fout
     assert calculate([buy(date(2024, 1, 1), "HOLD", 1, 5)], {}).sales == []
+
+
+def test_ref_value_from_foreign_currency():
+    # slotkoers 150 USD, ECB-koers 31/12/2025 1 EUR = 1,1745 USD (verzonnen)
+    ref = ref_value_from_currency("150", "1.1745")
+    assert ref == D("127.7139208174")
+    assert ref_value_from_currency("12.5", "1") == D("12.5")
+    txs = [buy(date(2020, 1, 1), "US", 10, 100, currency="USD", fx_per_eur=D("1.10")),
+           sell(date(2026, 3, 1), "US", 10, 160, currency="USD", fx_per_eur=D("1.15"))]
+    line = calculate(txs, {"US": ref}).sales[0].lines[0]
+    assert line.basis_eur == D("1277.14") and line.result_eur == D("114.16")
+    with pytest.raises(ValueError):
+        ref_value_from_currency("150", "0")
+    with pytest.raises(ValueError):
+        ref_value_from_currency("-1", "1.2")

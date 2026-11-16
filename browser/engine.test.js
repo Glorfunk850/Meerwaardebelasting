@@ -215,3 +215,15 @@ test("holdingsAt", () => {
   const h = M.holdingsAt(txs, "2025-12-31");
   assert.deepEqual(h.map(x => [x.asset, x.quantity.toString()]), [["A", "12"]]);
 });
+
+test("waarde 31/12/2025 uit slotkoers in vreemde munt", () => {
+  const ref = M.refValueFromCurrency("150", "1.1745");
+  assert.equal(ref.toString(), "127.7139208174");
+  assert.equal(M.refValueFromCurrency("12.5", "1").toString(), "12.5");
+  const txs = [buy("2020-01-01", "US", 10, 100, { currency: "USD", fx_per_eur: "1.10" }),
+               sell("2026-03-01", "US", 10, 160, { currency: "USD", fx_per_eur: "1.15" })];
+  const l = calculate(txs, { US: ref.toString() }).sales[0].lines[0];
+  eq(l.basis_eur, "1277.14"); eq(l.result_eur, "114.16");
+  assert.throws(() => M.refValueFromCurrency("150", "0"));
+  assert.throws(() => M.refValueFromCurrency("-1", "1.2"));
+});

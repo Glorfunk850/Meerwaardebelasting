@@ -25,6 +25,8 @@ kent delisting wel.
   en nooit tot een minderwaarde.
 - Minderwaarden enkel binnen hetzelfde jaar; geen overdracht van verlies.
 - FIFO; kosten en taksen niet aftrekbaar; vreemde munt tegen de koers op aankoop- en verkoopdatum.
+- Waarde op 31/12/2025 in vreemde munt: slotkoers in die munt, omgerekend tegen de ECB-referentiekoers van
+  31/12/2025 (eigen interpretatie: de wet regelt de omrekening van deze fictieve aanschaffingswaarde niet uitdrukkelijk).
 - Delisting: uitkoop/bod = verkoop; loutere schrapping of waardeloos zonder overdracht = geen belastbaar moment
   (eigen interpretatie, niet uitdrukkelijk geregeld).
 

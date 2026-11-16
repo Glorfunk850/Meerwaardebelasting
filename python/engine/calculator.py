@@ -325,6 +325,20 @@ def _summarize(sales, dividends, cfg: EngineConfig, withheld, through_year) -> d
     return out
 
 
+REF_PLACES = Decimal("1e-10")
+
+
+def ref_value_from_currency(price, fx_per_eur) -> Decimal:
+    """Waarde 31/12/2025 per stuk in EUR uit de slotkoers in vreemde munt en de wisselkoers
+    van 31/12/2025 (ECB-notatie: 1 EUR = fx_per_eur eenheden munt); afgerond op 10 decimalen."""
+    p, fx = Decimal(price), Decimal(fx_per_eur)
+    if fx <= 0:
+        raise ValueError("Wisselkoers op 31/12/2025 moet groter dan 0 zijn.")
+    if p < 0:
+        raise ValueError("Slotkoers op 31/12/2025 mag niet negatief zijn.")
+    return (p / fx).quantize(REF_PLACES, rounding=ROUND_HALF_UP)
+
+
 def compare_methods(transactions, ref_values, cfg: Optional[EngineConfig] = None, **kw) -> dict[str, Report]:
     """Berekent beide interpretaties van de historische prijs naast elkaar."""
     cfg = cfg or EngineConfig()

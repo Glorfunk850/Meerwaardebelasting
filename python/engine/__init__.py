@@ -18,7 +18,7 @@ from .models import (
     Event,
 )
 from .config import EngineConfig, TaxYearConfig, HistoricMethod, FifoScope, DEFAULT_YEARS
-from .calculator import calculate, compare_methods
+from .calculator import calculate, compare_methods, ref_value_from_currency
 
 __all__ = [
     "Transaction",
@@ -38,4 +38,5 @@ __all__ = [
     "DEFAULT_YEARS",
     "calculate",
     "compare_methods",
+    "ref_value_from_currency",
 ]

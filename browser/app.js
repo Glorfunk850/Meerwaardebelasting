@@ -668,6 +668,50 @@ dlg.addEventListener("close", () => {
   proofDraft.urls.forEach(u => setTimeout(() => URL.revokeObjectURL(u), 60000)); proofDraft.urls = [];
 });
 
+// ================================================================ waarde 31/12/2025
+// In EUR, of voor effecten in vreemde munt: slotkoers in die munt + wisselkoers op 31/12/2025.
+const hasVal = v => v != null && String(v).trim() !== "";
+/** Bekende wisselkoersen op 31/12/2025 per munt (uit eerder ingevulde activa). */
+function knownRefFx() {
+  const m = {};
+  for (const a of Object.values(state.assets)) if (hasVal(a.ref_fx_per_eur) && a.currency) m[a.currency] ??= a.ref_fx_per_eur;
+  return m;
+}
+function refInputs(ccy, a, placeholder, fxHint) {
+  const eur = `<input name="ref_value_eur" inputmode="decimal" class="num" value="${esc(a.ref_value_eur ?? "")}" placeholder="${esc(placeholder)}" aria-label="Waarde 31/12/2025 in EUR"`;
+  if (!ccy || ccy === "EUR") return eur + ">";
+  const fx = hasVal(a.ref_fx_per_eur) ? a.ref_fx_per_eur : (fxHint || "");
+  return `<div class="ref-fx" data-ccy="${esc(ccy)}">
+    <label>Slotkoers in ${esc(ccy)} <input name="ref_price" inputmode="decimal" class="num" value="${esc(a.ref_price ?? "")}" placeholder="${esc(placeholder)}"></label>
+    <label>Wisselkoers: 1 EUR = … ${esc(ccy)} <input name="ref_fx_per_eur" inputmode="decimal" class="num" value="${esc(fx)}" placeholder="ECB 31/12/2025"></label>
+    <label>In EUR ${eur}${hasVal(a.ref_price) ? " readonly" : ""}></label></div>`;
+}
+/** Bereken de EUR-waarde live zodra slotkoers en wisselkoers ingevuld zijn. */
+function syncRef(row) {
+  const p = $("[name=ref_price]", row); if (!p) return;
+  const eurEl = $("[name=ref_value_eur]", row), filled = hasVal(p.value);
+  eurEl.readOnly = filled;
+  if (!filled) return;
+  try { eurEl.value = window.MWB.refValueFromCurrency(p.value, $("[name=ref_fx_per_eur]", row).value).toString(); } catch { eurEl.value = ""; }
+}
+/** Wisselkoers die je bij één effect invult, overnemen bij de andere effecten in dezelfde munt zonder koers. */
+function spreadRefFx(table, row) {
+  const box = $(".ref-fx", row), fx = $("[name=ref_fx_per_eur]", row);
+  if (!box || !fx || !hasVal(fx.value)) return;
+  $$(".ref-fx", table).forEach(b => {
+    const other = $("[name=ref_fx_per_eur]", b);
+    if (b !== box && b.dataset.ccy === box.dataset.ccy && !hasVal(other.value)) { other.value = fx.value.trim(); syncRef(b.closest("tr")); }
+  });
+}
+function readRef(row, label) {
+  const p = $("[name=ref_price]", row);
+  const price = p ? dec(p.value, `slotkoers 31/12/2025 voor ${label}`, { nonNegative: true }) : null;
+  if (price == null)
+    return { ref_value_eur: dec($("[name=ref_value_eur]", row).value, `waarde 31/12/2025 voor ${label}`, { nonNegative: true }), ref_price: null, ref_fx_per_eur: null };
+  const fx = dec($("[name=ref_fx_per_eur]", row).value, `wisselkoers 31/12/2025 voor ${label}`, { required: true, positive: true });
+  return { ref_value_eur: window.MWB.refValueFromCurrency(price, fx).toString(), ref_price: price, ref_fx_per_eur: fx };
+}
+
 // ================================================================ activa
 function renderAssets() {
   const all = Object.entries(state.assets).sort(([a], [b]) => a.localeCompare(b));
@@ -689,6 +733,7 @@ function renderAssets() {
   const missing = list.filter(([i, a]) => refMissing(i, a)).length;
   $("#asset-missing").hidden = !missing;
   $("#asset-missing").textContent = `${missing === 1 ? "1 effect" : `${missing} effecten`} die je op 31/12/2025 had, ${missing === 1 ? "heeft" : "hebben"} nog geen waarde op 31/12/2025. Die is nodig zodra je ze verkoopt.`;
+  const fxHints = knownRefFx();
   $("#asset-table tbody").innerHTML = list.map(([isin, a]) => {
     const need = needsRef(isin), u = used(isin), gone = closed([isin, a]);
     return `<tr data-isin="${esc(isin)}"${gone ? ` class="muted"` : ""}>
@@ -698,14 +743,18 @@ function renderAssets() {
       <td><input name="isin" value="${esc(a.isin || (isIsinCode(isin) ? isin : ""))}" maxlength="12" placeholder="niet in export" autocapitalize="characters" aria-label="ISIN"></td>
       <td><select name="asset_type" aria-label="Type">${ASSET_TYPES.map(t => `<option ${t === a.asset_type ? "selected" : ""}>${t}</option>`).join("")}</select></td>
       <td><input name="currency" value="${esc(a.currency)}" maxlength="5" class="w-sm" aria-label="Munt"></td>
-      <td><input name="ref_value_eur" inputmode="decimal" class="num" value="${esc(a.ref_value_eur ?? "")}" placeholder="${need ? "verplicht" : "n.v.t."}" aria-label="Waarde 31/12/2025"></td>
-      <td><input name="ref_source" value="${esc(a.ref_source)}" placeholder="bv. Euronext slotkoers" aria-label="Bron"></td>
+      <td>${refInputs((a.currency || "EUR").toUpperCase(), a, need ? "verplicht" : "n.v.t.", fxHints[a.currency])}</td>
+      <td><input name="ref_source" value="${esc(a.ref_source)}" placeholder="bv. Euronext slotkoers, ECB-koers" aria-label="Bron"></td>
       <td class="actions-cell"><button class="btn small primary" data-save>Bewaar</button>
         ${gone ? `<button class="btn small danger" data-removeasset aria-label="Verwijder uit de lijst" title="Verwijder uit de lijst">✕</button>`
           : u ? "" : `<button class="btn small danger" data-delasset aria-label="Verwijder">✕</button>`}</td></tr>`;
   }).join("");
 }
 $("#asset-show-closed").addEventListener("change", renderAssets);
+$("#asset-table").addEventListener("input", e => { const row = e.target.closest("tr[data-isin]"); if (row) syncRef(row); });
+$("#asset-table").addEventListener("change", e => {
+  const row = e.target.closest("tr[data-isin]"); if (row && e.target.name === "ref_fx_per_eur") spreadRefFx($("#asset-table"), row);
+});
 $("#asset-table").addEventListener("click", async e => {
   const row = e.target.closest("tr[data-isin]");
   if (!row) return;
@@ -725,10 +774,12 @@ $("#asset-table").addEventListener("click", async e => {
   if (!e.target.closest("[data-save]")) return;
   const v = {}; $$("input, select", row).forEach(el => { v[el.name] = el.value.trim(); });
   try {
-    const ref = dec(v.ref_value_eur, "waarde 31/12/2025", { nonNegative: true });
+    const ccy = (v.currency || "EUR").toUpperCase();
+    const ref = ccy === "EUR" ? { ref_value_eur: dec(v.ref_value_eur, "waarde 31/12/2025", { nonNegative: true }), ref_price: null, ref_fx_per_eur: null }
+      : readRef(row, isin);
     const code = v.isin.replace(/\s/g, "").toUpperCase();
     if (code && !isIsinCode(code)) throw new InputError("Een ISIN heeft 12 tekens: 2 letters, 9 letters of cijfers en een cijfer (bv. BE0003565737).");
-    state.assets[isin] = { ...state.assets[isin], isin: code, asset_type: v.asset_type, currency: (v.currency || "EUR").toUpperCase(), ref_value_eur: ref, ref_source: v.ref_source };
+    state.assets[isin] = { ...state.assets[isin], isin: code, asset_type: v.asset_type, currency: ccy, ...ref, ref_source: v.ref_source };
     commit(); toast(`${isin} bewaard`);
   } catch (err) { toast(err.message, true); }
 });
@@ -949,16 +1000,19 @@ function openImportDialog(r) {
     ${dup ? `<br>${dup} transacties waren al eerder geïmporteerd en worden overgeslagen.` : ""}`;
   $("#imp-skipped").innerHTML = Object.entries(r.skipped).map(([k, v]) => `<li>${esc(k)}: ${v}</li>`).join("");
   $("#imp-owner").value = DEFAULT_OWNER;
+  const fxHints = knownRefFx();
   $("#imp-positions tbody").innerHTML = r.positions.map((p, i) => {
     const oldKey = [...(r.keyMoves || [])].find(([, to]) => to === p.asset)?.[0];
-    const cur = state.assets[p.asset]?.ref_value_eur ?? (oldKey ? state.assets[oldKey]?.ref_value_eur : undefined);
-    const val = cur ?? p.refHint?.value ?? "";
+    const known = [state.assets[p.asset], oldKey && state.assets[oldKey]].find(a => a && hasVal(a.ref_value_eur));
+    const cur = known?.ref_value_eur;
+    const ccy = String(r.assets?.[p.asset]?.currency || state.assets[p.asset]?.currency || "EUR").toUpperCase();
+    const val = known ? { ref_value_eur: cur, ref_price: known.ref_price, ref_fx_per_eur: known.ref_fx_per_eur } : { ref_value_eur: p.refHint?.value ?? "" };
     return `<tr data-i="${i}" class="${p.suspicious ? "suspicious" : ""}">
       <td><input type="checkbox" name="keep" ${p.suspicious ? "" : "checked"} aria-label="Nog in bezit"></td>
       <td><strong>${esc(p.asset)}</strong>${p.name ? `<br><span class="small muted">${esc(p.name)}</span>` : ""}${p.suspicious ? `<br><span class="small neg">waarschijnlijk niet meer in bezit (overname, splitsing of naamswijziging?)</span>` : ""}</td>
       <td class="num">${num(p.quantity)}</td>
       <td class="col-div">${esc(p.lastDividend || "–")}</td>
-      <td><input name="ref" inputmode="decimal" class="num" value="${esc(val)}" placeholder="slotkoers in EUR" aria-label="Waarde 31/12/2025">
+      <td>${refInputs(ccy, val, ccy === "EUR" ? "slotkoers in EUR" : "", fxHints[ccy])}
         <span class="hint need-hint" hidden></span>
         ${p.refHint && cur == null ? `<span class="hint">${esc(p.refHint.from)}</span>` : ""}</td></tr>`;
   }).join("") || `<tr><td colspan="5" class="muted">Geen posities op 31/12/2025 volgens deze export.</td></tr>`;
@@ -991,11 +1045,15 @@ function markNeededRefs() {
   const need = neededRefAssets();
   $$("#imp-positions tbody tr[data-i]").forEach(tr => {
     const p = pendingImport.positions[Number(tr.dataset.i)], why = need.get(p.asset), h = $(".need-hint", tr);
-    const empty = !$("[name=ref]", tr).value.trim();
+    const empty = !$("[name=ref_value_eur]", tr).value.trim();
     h.hidden = !(why && empty); h.textContent = why || ""; h.classList.toggle("neg", !!why);
   });
 }
-$("#imp-positions").addEventListener("input", markNeededRefs);
+$("#imp-positions").addEventListener("input", e => { const tr = e.target.closest("tr[data-i]"); if (tr) syncRef(tr); markNeededRefs(); });
+$("#imp-positions").addEventListener("change", e => {
+  const tr = e.target.closest("tr[data-i]");
+  if (tr && e.target.name === "ref_fx_per_eur") { spreadRefFx($("#imp-positions"), tr); markNeededRefs(); }
+});
 $("#imp-cancel").addEventListener("click", () => { $("#import-dialog").close(); pendingImport = null; });
 $("#imp-confirm").addEventListener("click", () => {
   const r = pendingImport; if (!r) return;
@@ -1004,7 +1062,7 @@ $("#imp-confirm").addEventListener("click", () => {
     // fotowaarden valideren vóór er iets verandert
     const decisions = $$("#imp-positions tbody tr[data-i]").map(tr => {
       const p = r.positions[Number(tr.dataset.i)];
-      return { p, keep: $("[name=keep]", tr).checked, ref: dec($("[name=ref]", tr).value, `waarde 31/12/2025 voor ${p.asset}`, { nonNegative: true }) };
+      return { p, keep: $("[name=keep]", tr).checked, ref: readRef(tr, p.asset) };
     });
     const delists = $$("#imp-delist tbody tr[data-d]").map(tr => {
       const d = r.delistings[Number(tr.dataset.d)], mode = $("[name=mode]", tr).value;
@@ -1038,9 +1096,10 @@ $("#imp-confirm").addEventListener("click", () => {
     for (const t of r.transactions) if (t.type === "DIVIDEND")
       state.assets[t.asset] ??= { name: "", asset_type: "aandeel", currency: t.currency, ref_value_eur: null, ref_source: "" };
     for (const { p, keep, ref } of decisions) {
-      if (keep && ref != null) {
-        const a = state.assets[p.asset];
-        if (a.ref_value_eur !== ref) { a.ref_value_eur = ref; a.ref_source = p.refHint && ref === D(p.refHint.value).toString() ? p.refHint.from : (a.ref_source || "ingevoerd bij import"); }
+      if (keep && ref.ref_value_eur != null) {
+        const a = state.assets[p.asset], v = ref.ref_value_eur;
+        if (a.ref_value_eur !== v) a.ref_source = p.refHint && v === D(p.refHint.value).toString() ? p.refHint.from : (a.ref_source || "ingevoerd bij import");
+        Object.assign(a, ref);
       }
       const corrId = `corr:${owner}:${p.asset}`;
       if (!keep && !state.transactions.some(t => t.import_id === corrId)) {
