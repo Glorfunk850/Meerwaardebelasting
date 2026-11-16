@@ -243,3 +243,66 @@ test("standaardexport: omgekeerde splitsing, dividenden, kapitaalvermindering en
   assert.equal(sale.result_eur.toFixed(2), "200.00"); // 40 x (30 - 25)
   assert.equal(rep.sales.find(s => s.asset === "GAMMA FOODS").result_eur.toFixed(2), "80.00"); // 4 x (150 - 130)
 });
+
+test("datums als tekst: ook één cijfer voor dag of maand", () => {
+  assert.equal(X.excelDate("11-09-2026"), "2026-09-11");
+  assert.equal(X.excelDate("1/9/2026"), "2026-09-01");
+  assert.equal(X.excelDate("11.09.2026 14:02"), "2026-09-11");
+  assert.equal(X.excelDate("2026-09-11T10:00:00"), "2026-09-11");
+  assert.equal(X.excelDate("31/13/2026"), null);
+});
+
+test("standaardexport: uitvoeringen zonder (juiste) boeking en boekingen zonder uitvoering worden toch ingelezen", () => {
+  const sh = standardExport(), T = mk(TH), E = mk(EH);
+  const E1 = { "Instrument": "Epsilon Licht NV", "Instrumentsymbool": "EPS:xams", "Instrument ISIN": "NL0000000105", "Instrumentvaluta": "EUR", "Type": "Stock" };
+  const exec = (date, id, ins, qty, price) => E({ "Transactie-ID": id, "Aangepaste transactiedatum": day(date), "Traded Quantity": qty, "Prijs": price,
+    "Verhandelde waarde": -qty * price, "Openen/sluiten": qty > 0 ? "To Open" : "To Close", ...ins });
+  sh._Transacties.splice(1, 0,
+    exec("2026-09-11", "Y1", E1, -10, 25),                 // verkoop zonder boeking
+    exec("2026-08-03", "Y2", INS.B, 2, 60),                // USD, zonder boeking: koers van de dichtstbijzijnde dag
+    exec("2026-04-02", "Y3", E1, 4, 22),                   // boeking staat onder een ander transactie-id
+    exec("2025-05-05", "Y4", E1, 6, 20));
+  sh.Transacties.splice(1, 0,
+    T({ "Transactiedatum": serial("2026-04-02"), "Transactie-ID": "Z3", "Transactietype": "Transactie", "Acties": "Koop 4 @ 22.00 EUR",
+      "Boekingsbedrag": -91, "Valuta": "EUR", "Omrekeningskoers": 1, "Totale kosten": -3, ...E1 }),
+    T({ "Transactiedatum": serial("2026-10-20"), "Transactie-ID": "Z5", "Transactietype": "Transactie", "Acties": "Verkoop -3 @ 70.00 USD",
+      "Boekingsbedrag": 186, "Valuta": "EUR", "Omrekeningskoers": 0.9, "Totale kosten": -3, "Gerealiseerde W/V": 25, ...INS.B }),
+    T({ "Transactiedatum": serial("2026-10-21"), "Transactie-ID": "Z6", "Transactietype": "Transactie", "Acties": "Overboeking",
+      "Boekingsbedrag": -1, "Valuta": "EUR", ...INS.B }),
+    T({ "Transactiedatum": serial("2025-05-05"), "Transactie-ID": "Y4", "Transactietype": "Transactie", "Acties": "Koop 6 @ 20.00 EUR",
+      "Boekingsbedrag": -122, "Valuta": "EUR", "Omrekeningskoers": 1, "Totale kosten": -2, ...E1 }));
+  const r = S.parseSaxoSheets(sh, { fileName: "std.xlsx" });
+  const tx = id => r.transactions.find(t => t.import_id.startsWith(`s:${id}|`));
+  const y1 = tx("Y1");
+  assert.equal(y1.type, "SELL"); assert.equal(y1.trade_date, "2026-09-11"); assert.equal(y1.asset, "EPSILON LICHT NV");
+  assert.equal(y1.quantity, "10"); assert.equal(y1.price, "25"); assert.equal(y1.fees, "0"); assert.equal(y1.taxes, "0");
+  assert.ok(r.warnings.some(w => w.includes("Epsilon Licht NV op 2026-09-11 heeft geen boeking")));
+  const y2 = tx("Y2");
+  assert.equal(y2.currency, "USD"); assert.equal(y2.fx_per_eur, M.D(1).div("0.9").round(10).toString());
+  assert.ok(r.warnings.some(w => w.includes("Beta Corp.") && w.includes("omrekeningskoers van 2026-10-20")));
+  assert.equal(r.skipped["Uitgevoerd zonder boeking (ingelezen zonder kosten)"], 2);
+  // gekoppeld via ISIN en datum: kosten uit de boeking
+  const y3 = tx("Y3");
+  assert.equal(y3.type, "BUY"); assert.equal(y3.fees, "3");
+  assert.ok(r.warnings.some(w => w.includes("boeking gevonden via ISIN en datum")));
+  // boeking zonder uitvoering: aantal en prijs uit de omschrijving
+  const z5 = tx("Z5");
+  assert.equal(z5.type, "SELL"); assert.equal(z5.quantity, "3"); assert.equal(z5.price, "70"); assert.equal(z5.trade_date, "2026-10-20");
+  assert.equal(z5.fees, M.D(3).mul(z5.fx_per_eur).round(2).toString()); assert.equal(z5.saxo_result, "25");
+  assert.ok(r.warnings.some(w => w.includes("geen uitvoering in _Transacties")));
+  assert.equal(r.skipped["Boekingen zonder aantal of prijs"], 1);
+  assert.equal(new Set(r.transactions.map(t => t.import_id)).size, r.transactions.length);
+  // de rekenkern kan alles verwerken
+  const rep = M.calculate(r.transactions, { "ALFA BOUW NV": "25", "GAMMA FOODS": "130", "EPSILON LICHT NV": "21", "BETA CORP.": "55" });
+  assert.equal(rep.sales.find(s => s.asset === "EPSILON LICHT NV").result_eur.toFixed(2), "36.00"); // FIFO: 6 x (25 - 21) + 4 x (25 - 22)
+});
+
+test("oude export: uitgevoerde order zonder bedrag wordt ingelezen, een pending order niet", () => {
+  const sh = sheets();
+  sh.Transacties.splice(1, 0, row({ date: "2026-09-11", id: "T8", action: "Verkoop -5 @ 31.00 EUR", amount: null, costs: null,
+    name: "*Delisted 20260729 (Geschrapt NV)", isin: "BE0000000003", oc: "To Close", qty: -5, price: 31 }));
+  const r = S.parseSaxoSheets(sh);
+  const t8 = r.transactions.find(t => t.import_id.startsWith("s:T8|"));
+  assert.equal(t8.type, "SELL"); assert.equal(t8.quantity, "5"); assert.equal(t8.fees, "0");
+  assert.equal(r.skipped["Niet (volledig) uitgevoerde orders"], 1); // de pending order
+});
