@@ -51,14 +51,20 @@ def _pool_key(tx_or_lot, scope: FifoScope) -> tuple:
     return (tx_or_lot.owner, tx_or_lot.asset)
 
 
-def _historic_unit_cost(lot: Lot, pool: list[Lot], method: HistoricMethod) -> Optional[Decimal]:
-    """Historische kost per stuk die mag gebruikt worden, of None."""
+def _historic_unit_cost(lot: Lot, pool: list[Lot], method: HistoricMethod,
+                        assume_proven: bool = False) -> Optional[Decimal]:
+    """Historische kost per stuk die mag gebruikt worden, of None.
+    assume_proven: alsof elke aankoop van vóór 2026 met gekende prijs bewijsbaar is (melding 'gemist voordeel')."""
     if not lot.pre_2026:
         return None
+
+    def ok(l: Lot) -> bool:
+        return l.cost_known and (l.historic_proven or assume_proven)
+
     if method == HistoricMethod.FIFO:
-        return lot.unit_cost_eur if (lot.historic_proven and lot.cost_known) else None
+        return lot.unit_cost_eur if ok(lot) else None
     pre = [l for l in pool if l.pre_2026]
-    if not pre or any(not (l.historic_proven and l.cost_known) for l in pre):
+    if not pre or any(not ok(l) for l in pre):
         return None
     total_qty = sum((l.orig_quantity for l in pre), ZERO)
     if total_qty == 0:
@@ -100,7 +106,15 @@ def _line_for_lot(
             if cfg.historic_method == HistoricMethod.AVERAGE:
                 note += " [gemiddelde methode]"
             return SaleLine(lot.lot_id, lot.acquired, qty, proceeds, hist, BasisUsed.HISTORIC, result, note)
-    return SaleLine(lot.lot_id, lot.acquired, qty, proceeds, ref, BasisUsed.REF_2025, proceeds - ref)
+    line = SaleLine(lot.lot_id, lot.acquired, qty, proceeds, ref, BasisUsed.REF_2025, proceeds - ref)
+    # gemist voordeel: hogere historische prijs, maar (een) aankoop niet als bewijsbaar aangeduid
+    if hist_unit is None and sale_date <= cfg.historic_until:
+        hyp = _historic_unit_cost(lot, pool, cfg.historic_method, assume_proven=True)
+        if hyp is not None:
+            hist = money(qty * hyp)
+            if hist > ref:
+                line.missed_historic_eur = (proceeds - ref) - max(ZERO, proceeds - hist)
+    return line
 
 
 def _new_lot(tx: Transaction, lot_id: int, ref_values: Mapping[str, Decimal]) -> Lot:
@@ -263,6 +277,14 @@ def _process_sale(tx: Transaction, pool: list[Lot], cfg: EngineConfig) -> SaleRe
         sale.reynders_deduction_eur = ded
         if ded < tx.reynders_eur:
             sale.warnings.append("Reynders-aftrek beperkt tot de positieve meerwaarde van deze verkoop.")
+    missed = sum((l.missed_historic_eur for l in sale.lines), ZERO)
+    if missed > 0:
+        sale.warnings.append(
+            "Mogelijk voordeel: de historische aankoopprijs ligt hoger dan de waarde op 31/12/2025, maar de aankoop "
+            "is niet als bewijsbaar aangeduid. "
+            f"Met bewijs zou de meerwaarde {money(missed)} EUR lager zijn: vink 'Ik kan deze aankoopprijs bewijzen' "
+            "aan bij de aankoop als je een bewijsstuk hebt."
+        )
     if any(l.basis_used == BasisUsed.HISTORIC for l in sale.lines):
         sale.warnings.append(
             "Historische aankoopprijs gebruikt: zelf inroepen in de aangifte en bewijsstukken bewaren."

@@ -463,6 +463,7 @@ def create_app(db_path: str | Path | None = None) -> Flask:
                 "acquired": l.acquired.isoformat() if l.acquired else None, "quantity": s(l.quantity),
                 "proceeds_eur": s(l.proceeds_eur), "basis_eur": s(l.basis_eur),
                 "basis_used": l.basis_used.value, "result_eur": s(l.result_eur), "note": l.note,
+                "missed_historic_eur": s(l.missed_historic_eur),
             } for l in x.lines],
         } for x in rep.sales]
         return jsonify(

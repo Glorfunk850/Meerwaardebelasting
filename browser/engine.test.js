@@ -82,6 +82,32 @@ test("historic not after 2030", () => {
 test("historic requires proof", () => {
   eq(calculate([buy("2023-01-01", "S", 1, 150), sell("2026-06-01", "S", 1, 125)], { S: "120" }).sales[0].result_eur, 5);
 });
+test("missed historic reported without proof", () => {
+  const b = buy("2023-01-01", "S", 1, 150);
+  let s = calculate([b, sell("2026-06-01", "S", 1, 125)], { S: "120" }).sales[0];
+  eq(s.lines[0].missed_historic_eur, 5);
+  assert.ok(s.warnings.some(w => w.includes("Mogelijk voordeel") && w.includes("5.00 EUR")));
+  s = calculate([b, sell("2026-06-01", "S", 1, 200)], { S: "120" }).sales[0];
+  eq(s.lines[0].missed_historic_eur, 30);
+});
+test("no missed historic when not applicable", () => {
+  const cases = [
+    [buy("2023-01-01", "S", 1, 150, { historic_proven: true }), sell("2026-06-01", "S", 1, 125)],
+    [buy("2023-01-01", "S", 1, 100), sell("2026-06-01", "S", 1, 125)],
+    [buy("2023-01-01", "S", 1, 150), sell("2026-06-01", "S", 1, 110)],
+    [buy("2023-01-01", "S", 1, 150), sell("2031-01-02", "S", 1, 125)],
+  ];
+  for (const txs of cases) {
+    const s = calculate(txs, { S: "120" }, cfgYears(2027, 2028, 2029, 2030, 2031)).sales[0];
+    eq(s.lines[0].missed_historic_eur, 0);
+    assert.ok(!s.warnings.some(w => w.includes("Mogelijk voordeel")));
+  }
+});
+test("missed historic average method", () => {
+  const txs = [buy("2023-01-01", "S", 100, 150, { historic_proven: true }), buy("2024-01-01", "S", 100, 130), sell("2026-06-01", "S", 100, 160)];
+  const s = calculate(txs, { S: "120" }, { ...defaultConfig(), historicMethod: "GEMIDDELD" }).sales[0];
+  eq(s.result_eur, 4000); eq(s.lines[0].missed_historic_eur, 2000);
+});
 test("historic lower uses ref", () => {
   eq(calculate([buy("2020-01-01", "S", 10, 10, { historic_proven: true }), sell("2026-06-01", "S", 10, 30)], { S: "25" }).sales[0].result_eur, 50);
 });
