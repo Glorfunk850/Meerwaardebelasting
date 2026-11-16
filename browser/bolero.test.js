@@ -64,9 +64,24 @@ test("parse sample export", () => {
   assert.equal(us.fx_per_eur, "1.1"); assert.ok(us.note.includes("geschat"));
   // inschrijving telt als aankoop; historische prijs bewijsbaar voor aankopen vóór 2026
   assert.ok(by("BUY").some(t => t.asset === "VERDWENEN INC (NY)" && t.note.startsWith("inschrijving") && t.historic_proven));
-  // overgeslagen geldbewegingen
-  assert.equal(r.skipped["Wisseltransacties"], 2); assert.equal(r.skipped["Terugstortingen (kosten)"], 1);
-  assert.equal(r.skipped["Geannuleerde boekingen (storno)"], 4);
+  // geldbewegingen: enkel ter info, apart van de transacties
+  const kinds = r.cash.map(c => c.kind).sort();
+  assert.deepEqual(kinds, ["OPNAME", "STORNO", "STORNO", "STORNO", "STORNO", "STORTING", "TERUGSTORTING", "WISSEL", "WISSEL"]);
+  assert.deepEqual(r.skipped, {});
+  const dep = r.cash.find(c => c.kind === "STORTING");
+  assert.equal(dep.date, "2019-02-01"); assert.equal(dep.amount, "5000"); assert.equal(dep.currency, "EUR"); assert.equal(dep.status, "info");
+  assert.equal(dep.owner, "ik"); assert.equal(dep.broker, "Bolero"); assert.equal(dep.import_source, "s.csv:22");
+  assert.equal(r.cash.find(c => c.kind === "OPNAME").amount, "-1200");
+  assert.deepEqual(r.cash.filter(c => c.kind === "WISSEL").map(c => `${c.amount} ${c.currency}`).sort(), ["-1000 EUR", "1100 USD"]);
+  // storno: de geannuleerde boeking en de correctie, beide al verwerkt
+  const st = r.cash.filter(c => c.kind === "STORNO");
+  assert.ok(st.every(c => c.status === "verwerkt"));
+  assert.deepEqual(st.map(c => c.amount).sort(), ["-35", "-512.4", "35", "512.4"]);
+  // stabiele, unieke import-id's, verschillend van die van transacties
+  const ids = r.cash.map(c => c.import_id);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.ok(!ids.some(id => r.transactions.some(t => t.import_id === id)));
+  assert.deepEqual(B.parseBolero(SAMPLE, { owner: "ik", fileName: "s.csv" }).cash.map(c => c.import_id), ids);
   // fotowaarde afgeleid uit Bolero: (250 x 6,10 + 600) / 250 = 8,50
   assert.equal(r.refHints["VOORBEELD NV (PA)"].value, "8.5");
   // posities op 31/12/2025: Voorbeeld 150+100, Oud 50, US Corp 10, Verdwenen 100 (geen dividend -> verdacht)
@@ -116,6 +131,7 @@ test("Excel-export geeft dezelfde transacties als de CSV", () => {
   const strip = t => { const { import_id, import_source, ...rest } = t; return rest; };
   assert.deepEqual(xl.transactions.map(strip), csv.transactions.map(strip));
   assert.deepEqual(xl.skipped, csv.skipped);
+  assert.deepEqual(xl.cash.map(strip), csv.cash.map(strip));
   assert.equal(xl.positions.length, csv.positions.length);
   // zelfs waar de tekst van de getallen verschilt ("6,10" tegenover 6.1) herkent de import ze als dezelfde
   assert.deepEqual(B.duplicateFlags(csv.transactions, xl.transactions), xl.transactions.map(() => true));

@@ -116,6 +116,30 @@ tr.clickable { cursor: pointer; } tr.clickable:hover td { background: #f3f7fb; }
 .alert.ok { background: #e8f4ee; color: var(--pos); border: 1px solid #b9dcc8; }
 tr.suspicious td { background: #fff8f8; }
 #import-dialog.saxo .col-div { display: none; }
+/* geldbewegingen (enkel ter info) */
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; background: var(--panel); }
+.seg button { border: 0; border-left: 1px solid var(--line); background: transparent; font: inherit; font-size: .88rem; padding: .45rem .7rem; cursor: pointer; color: var(--muted); min-height: 38px; }
+.seg button:first-child { border-left: 0; }
+.seg button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.seg .n { font-size: .74rem; opacity: .8; margin-left: .2rem; }
+.badge.DIVIDEND { background: #eef6e8; color: #3f6b14; }
+.badge.cash { background: #eef2f6; color: #44505e; }
+.badge.cash.in { background: #e8f4ee; color: var(--pos); }
+.badge.cash.out { background: #fdf0e6; color: #9a4700; }
+tr.info td { background: #fbfcfd; color: #44505e; }
+td.cash-what { white-space: normal; min-width: 15rem; }
+.cash-note { display: block; font-size: .74rem; color: var(--muted); white-space: normal; margin-top: .1rem; }
+.cash-note.done::before { content: "✓ "; color: var(--pos); }
+.cash-note.warn { color: var(--warn); }
+.cash-note.warn::before { content: "⚠ "; }
+#cash-summary { margin-bottom: .8rem; }
+#cash-summary tfoot td { font-weight: 700; background: #fafbfc; border-top: 2px solid var(--line); }
+.imp-list { list-style: none; padding: 0; margin: .3rem 0 0; }
+.imp-list li { display: flex; gap: .6rem; align-items: baseline; padding: .3rem 0; border-top: 1px solid var(--line); font-size: .9rem; }
+.imp-list li:first-child { border-top: 0; }
+.imp-list .cnt { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 2.2rem; text-align: right; }
+.imp-list .grow { flex: 1; }
+.imp-sub { font-size: .76rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: .8rem 0 .1rem; font-weight: 600; }
 .pos { color: var(--pos); } .neg { color: var(--neg); }
 
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; margin-top: .5rem; }
@@ -213,13 +237,24 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
         <label class="btn ghost">Export importeren (Bolero/Saxo)<input type="file" id="import-bolero" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></label>
         <button class="btn primary" data-action="new-tx">+ Nieuwe transactie</button></div></div>
     <div class="filters">
+      <label>Tonen <span class="seg" id="f-show" role="group" aria-label="Tonen">
+        <button type="button" data-show="tx">Transacties<span class="n"></span></button>
+        <button type="button" data-show="cash">Geldbewegingen<span class="n"></span></button>
+        <button type="button" data-show="all" class="on">Alles<span class="n"></span></button></span></label>
       <label>Jaar <select id="f-year"><option value="">Alle</option></select></label>
       <label>Eigenaar <select id="f-owner"><option value="">Alle</option></select></label>
+      <label>Soort <select id="f-kind"><option value="">Alle</option></select></label>
       <label>Actief <input id="f-asset" placeholder="naam" size="12"></label>
       <label>Bewijs <select id="f-proof"><option value="">Alle</option><option value="met">Met bewijs</option>
         <option value="zonder">Bewijs ontbreekt</option></select></label>
     </div>
     <p id="proof-missing" class="hint" hidden></p>
+    <div id="cash-summary" hidden>
+      <div class="table-wrap"><table><thead><tr><th>Geldoverzicht per jaar (info)</th><th class="num">Gestort</th><th class="num">Opgenomen</th>
+        <th class="num">Netto inbreng</th><th class="num">Dividend (netto)</th><th class="num">Kapitaalvermindering</th><th class="num">Ingehouden MWB</th></tr></thead>
+        <tbody></tbody><tfoot></tfoot></table></div>
+      <p class="hint" id="cash-summary-hint"></p>
+    </div>
     <div class="table-wrap"><table id="tx-table"><thead><tr>
       <th>Datum</th><th>Type</th><th>Actief</th><th class="num">Aantal</th><th class="num">Prijs / bedrag</th>
       <th>Munt</th><th>Eigenaar</th><th>Broker</th><th></th></tr></thead><tbody></tbody></table></div>
@@ -344,7 +379,10 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
 <dialog id="import-dialog" style="width:min(820px,96vw)"><div class="body">
   <h3 id="imp-title">Export importeren</h3>
   <p id="imp-summary"></p>
-  <details><summary class="small muted">Overgeslagen regels (geldbewegingen zonder effect op de belasting)</summary><ul id="imp-skipped" class="small"></ul></details>
+  <details id="imp-cash-wrap" style="margin-top:.6rem"><summary class="small"><strong>Geldbewegingen (<span id="imp-cash-count"></span>): enkel ter info, tellen niet mee voor de belasting</strong></summary>
+    <div id="imp-cash"></div>
+    <label class="check" style="margin-top:.6rem"><input type="checkbox" id="imp-cash-add" checked> Geldbewegingen mee importeren</label></details>
+  <details id="imp-skipped-wrap"><summary class="small muted">Niet geïmporteerd</summary><ul id="imp-skipped" class="small"></ul></details>
   <label class="field" style="max-width:240px;margin-top:.8rem">Eigenaar <input id="imp-owner" list="owner-list"></label>
   <h3>Posities op 31/12/2025 controleren</h3>
   <p class="hint">De export bevat geen splitsingen, overnames, naamswijzigingen of effecten die je van een andere bank overzette.
@@ -366,6 +404,15 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     <ul id="imp-warnings" class="small"></ul></details>
   <p class="hint">Aankopen van vóór 2026 worden gemarkeerd als "historische prijs bewijsbaar": de afrekeningen van je broker gelden als bewijs. Pas dat per transactie aan als nodig.</p>
   <div class="actions"><button class="btn ghost" id="imp-cancel">Annuleren</button><button class="btn primary" id="imp-confirm">Importeren</button></div>
+</div></dialog>
+
+<dialog id="cash-dialog" style="width:min(520px,94vw)"><div class="body">
+  <h3 id="cash-title">Geldbeweging</h3>
+  <p class="hint" style="margin-top:0">Enkel ter info: geldbewegingen tellen nooit mee voor de meerwaardebelasting.</p>
+  <dl class="kv" id="cash-details"></dl>
+  <label class="field" style="margin-top:.8rem">Notitie <input id="cash-note"></label>
+  <div class="actions"><button type="button" class="btn danger left" id="cash-delete">Verwijderen</button>
+    <button type="button" class="btn ghost" id="cash-cancel">Annuleren</button><button type="button" class="btn primary" id="cash-save">Bewaren</button></div>
 </div></dialog>
 
 <dialog id="confirm-dialog" style="width:min(420px,92vw)"><div class="body">
@@ -770,6 +817,124 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.MWB = api;
 })(typeof window !== "undefined" ? window : globalThis);
 </script>
+<script>/* Geldbewegingen: regels uit een broker-export die geen effect hebben op de meerwaardebelasting
+ * (stortingen, opnames, kapitaalverminderingen, teruggeboekte dividenden, ...), enkel ter info bewaard.
+ * Ze worden apart van de transacties opgeslagen (state.cash) en gaan nooit naar de rekenkern.
+ *
+ * Een geldbeweging: { kind, date, amount (tekst, met teken, in `currency`; of null), currency, asset_name, description,
+ *   status: "info" (nieuwe informatie) | "verwerkt" (zit al op een andere manier in de tool), remark, warn (remark is een aandachtspunt), owner, broker,
+ *   import_id, import_source } */
+(function (root) {
+  "use strict";
+  const node = typeof module !== "undefined" && module.exports;
+  const M = node ? require("./engine.js") : root.MWB;
+  const { D, ZERO } = M;
+
+  // soort -> [label in de lijst, groep in het importvenster]
+  const KINDS = {
+    STORTING: ["Storting", "Stortingen"],
+    OPNAME: ["Opname", "Opnames"],
+    MWB: ["Ingehouden MWB", "Ingehouden meerwaardebelasting"],
+    BOD: ["Cash overnamebod", "Cash bij overnamebiedingen"],
+    FRACTIE: ["Cash fractie", "Cash bij splitsingen (fracties)"],
+    KAPVERM: ["Kapitaalvermindering", "Kapitaalverminderingen"],
+    DIV_TERUG: ["Dividend teruggeboekt", "Teruggeboekte dividenden"],
+    DUBBEL: ["Dubbele regel", "Dubbele regels bij corporate actions"],
+    CA: ["Corporate action", "Andere corporate actions"],
+    WISSEL: ["Wisseltransactie", "Wisseltransacties"],
+    TERUGSTORTING: ["Terugstorting kosten", "Terugstortingen (kosten)"],
+    TAKSRECUP: ["Taksrecuperatie", "Recuperatie buitenlandse taks"],
+    KOSTEN: ["Kosten", "Kosten corporate actions"],
+    STORNO: ["Geannuleerd", "Geannuleerde boekingen (storno)"],
+    ANDERE: ["Andere", "Andere regels"],
+  };
+  const label = kind => (KINDS[kind] || KINDS.ANDERE)[0];
+  const group = kind => (KINDS[kind] || KINDS.ANDERE)[1];
+
+  /** Maakt stabiele import-id's: dezelfde inhoud krijgt een volgnummer. */
+  function idMaker(prefix) {
+    const seen = new Map();
+    return (...parts) => {
+      const base = parts.map(p => String(p ?? "")).join("|");
+      const k = (seen.get(base) || 0) + 1; seen.set(base, k);
+      return `${prefix}${base}|${k}`;
+    };
+  }
+
+  /** Geldbewegingen uit `incoming` die nog niet in `existing` zitten (zelfde import-id). */
+  function fresh(existing, incoming) {
+    const have = new Set((existing || []).map(c => c.import_id).filter(Boolean));
+    return (incoming || []).filter(c => !c.import_id || !have.has(c.import_id));
+  }
+
+  /** Telling per groep voor het importvenster: [{ group, kind, status, remark, count }], in volgorde van KINDS. */
+  function groups(cash) {
+    const map = new Map();
+    for (const c of cash) {
+      const key = `${c.kind}|${c.status}`;
+      const g = map.get(key) || { group: group(c.kind), kind: c.kind, status: c.status, remarks: new Set(), count: 0 };
+      g.count++; if (c.status === "verwerkt" && c.remark) g.remarks.add(c.remark);
+      map.set(key, g);
+    }
+    const order = Object.keys(KINDS);
+    return [...map.values()].map(g => ({ ...g, remark: [...g.remarks].join("; ") }))
+      .sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind));
+  }
+
+  const toEur = t => {
+    const amt = D(t.amount || 0);
+    if (!t.currency || t.currency === "EUR") return amt;
+    if (t.eur_per_ccy != null && t.eur_per_ccy !== "") return amt.mul(t.eur_per_ccy);
+    return amt.div(t.fx_per_eur || 1);
+  };
+
+  /**
+   * Geldoverzicht per jaar (bedragen in EUR, Dec). Enkel geldbewegingen in EUR tellen mee; andere munten worden geteld in `foreign`.
+   * Dividend = netto dividenden (transacties) + teruggeboekte dividenden (geldbewegingen).
+   * Ingehouden = door de broker ingehouden meerwaardebelasting (zoals bij Instellingen).
+   */
+  function summary(cash, transactions, withheld, { owner = "", year = "" } = {}) {
+    const keep = (o, y) => (!owner || o === owner) && (!year || String(y) === String(year));
+    const years = new Map(), foreign = { count: 0 };
+    const row = y => {
+      if (!years.has(y)) years.set(y, { year: y, deposits: ZERO, withdrawals: ZERO, dividends: ZERO, capital_reductions: ZERO, withheld: ZERO });
+      return years.get(y);
+    };
+    for (const c of cash || []) {
+      const y = c.date.slice(0, 4);
+      if (!keep(c.owner, y) || c.amount == null || c.amount === "") continue;
+      if (c.currency && c.currency !== "EUR") { if (["STORTING", "OPNAME", "KAPVERM", "DIV_TERUG"].includes(c.kind)) foreign.count++; continue; }
+      const amt = D(c.amount);
+      if (c.kind === "STORTING") row(y).deposits = row(y).deposits.add(amt);
+      else if (c.kind === "OPNAME") row(y).withdrawals = row(y).withdrawals.add(amt);
+      else if (c.kind === "KAPVERM") row(y).capital_reductions = row(y).capital_reductions.add(amt);
+      else if (c.kind === "DIV_TERUG") row(y).dividends = row(y).dividends.add(amt);
+    }
+    // enkel jaren met geldbewegingen; dividenden en inhoudingen vullen die aan
+    const cashYears = new Set(years.keys());
+    for (const t of transactions || []) {
+      const y = t.trade_date.slice(0, 4);
+      if (t.type !== "DIVIDEND" || !keep(t.owner, y) || !cashYears.has(y)) continue;
+      row(y).dividends = row(y).dividends.add(toEur(t));
+    }
+    for (const w of withheld || []) {
+      const y = String(w.year);
+      if (!keep(w.owner, y) || !cashYears.has(y)) continue;
+      row(y).withheld = row(y).withheld.sub(D(w.amount || 0));
+    }
+    const rows = [...years.values()].sort((a, b) => a.year.localeCompare(b.year))
+      .map(r => ({ ...r, net: r.deposits.add(r.withdrawals) }));
+    const total = rows.reduce((t, r) => {
+      for (const k of ["deposits", "withdrawals", "net", "dividends", "capital_reductions", "withheld"]) t[k] = t[k].add(r[k]);
+      return t;
+    }, { year: "Totaal", deposits: ZERO, withdrawals: ZERO, net: ZERO, dividends: ZERO, capital_reductions: ZERO, withheld: ZERO });
+    return { rows, total, foreign: foreign.count };
+  }
+
+  const api = { KINDS, label, group, idMaker, fresh, groups, summary };
+  if (node) module.exports = api; else root.GELD = api;
+})(typeof window !== "undefined" ? window : globalThis);
+</script>
 <script>/* Importer voor de Bolero-export "Cashbewegingen" (Excel of CSV).
  * Zet aankopen, verkopen, inschrijvingen en dividenden om naar transacties voor de rekenkern.
  * Het bestand bevat geen ISIN's, splitsingen, overnames of overboekingen van effecten:
@@ -835,13 +1000,14 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
 
   const TRADE = /^(Aankoop Online|Aankoop|Verkoop Online|Verkoop|Inschrijving)\s+(.+)$/i;
   const DIVIDEND = /^Uitbetaling (dividenden|effecten)\s+(.+)$/i;
+  // geldbewegingen zonder effect op de belasting -> soort (zie geld.js)
   const SKIP = [
-    [/^Wisseltransactie/i, "Wisseltransacties"],
-    [/^Overschrijving naar klant/i, "Overschrijvingen naar je rekening"],
-    [/^Provisionering rekening klant/i, "Stortingen op je Bolero-rekening"],
-    [/^Terugstorting/i, "Terugstortingen (kosten)"],
-    [/^Taksrecuperatie/i, "Recuperatie buitenlandse taks"],
-    [/^Kost igv corporate actions/i, "Kosten corporate actions"],
+    [/^Wisseltransactie/i, "WISSEL"],
+    [/^Overschrijving naar klant/i, "OPNAME"],
+    [/^Provisionering rekening klant/i, "STORTING"],
+    [/^Terugstorting/i, "TERUGSTORTING"],
+    [/^Taksrecuperatie/i, "TAKSRECUP"],
+    [/^Kost igv corporate actions/i, "KOSTEN"],
   ];
 
   /** FNV-1a 64-bit als korte, stabiele sleutel voor herimport. */
@@ -955,7 +1121,13 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
       return best;
     }
 
-    const out = [], warnings = [], fxWarnings = [], skipped = {}, refHints = {}, assets = {};
+    const out = [], warnings = [], fxWarnings = [], skipped = {}, refHints = {}, assets = {}, cash = [];
+    const addCash = (kind, l, { status = "info", remark = "", warn = false, importId: id } = {}) => {
+      const amount = bnum(l.r[C.amount]);
+      cash.push({ kind, date: l.date, amount: amount == null ? null : amount.toString(), currency: (l.r[C.ccy] || "").trim() || "EUR",
+        asset_name: "", description: l.desc, status, remark, ...(warn ? { warn } : {}), owner, broker, import_id: id || "c" + importId(l), import_source: `${fileName}:${l.n}` });
+    };
+    const lineOf = new Map(); // transactie -> exportregel (voor geannuleerde boekingen)
     const seen = new Map();
     const importId = l => {
       const base = `bolero|${l.date}|${l.desc}|${l.r[C.amount]}|${l.r[C.qty]}|${l.r[C.price]}`;
@@ -1011,7 +1183,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
         const pl = bnum(l.r[C.pl]), mwb = bnum(l.r[C.mwb]);
         if (isSell && pl != null) { t.bolero_result = pl.toString(); if (mwb != null) t.bolero_tax = mwb.toString(); }
         assets[id] ??= { currency: ccy };
-        out.push(t);
+        out.push(t); lineOf.set(t, l);
       } else if ((m = DIVIDEND.exec(l.desc))) {
         if (amount == null) continue;
         const name = m[2];
@@ -1021,20 +1193,20 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
         if (amtCcy !== "EUR") { const f = fxFor(amtCcy, l.date); fx = f ? f.rate.round(6) : null; }
         if (fx === null) { warnings.push(`${src}: dividend ${name} in ${amtCcy} zonder wisselkoers, overgeslagen.`); continue; }
         const rv = bnum(l.r[C.rv]);
-        out.push({
+        const dv = {
           type: "DIVIDEND", trade_date: l.date, asset: id, amount: amount.toString(), currency: amtCcy, fx_per_eur: fx.toString(),
           quantity: "0", price: "0", fees: "0", taxes: "0", owner, broker, historic_proven: false, cost_known: true, reynders_eur: "0",
           split_ratio: null, note: `netto${rv ? `; roerende voorheffing € ${rv}` : ""}${m[1].toLowerCase() === "effecten" ? "; coupon/recht" : ""}`,
           import_id: importId(l), import_source: src,
-        });
+        };
+        out.push(dv); lineOf.set(dv, l);
       } else if (/^Inboeking corporate action/i.test(l.desc)) {
-        skipped["Corporate actions"] = (skipped["Corporate actions"] || 0) + 1;
+        addCash("CA", l, { remark: "controleer de betrokken posities", warn: true });
         warnings.push(`${src}: ${l.desc} – corporate action (bv. overname of omruiling) staat niet volledig in de export. Controleer de betrokken posities.`);
       } else {
         const s = SKIP.find(([re]) => re.test(l.desc));
-        const label = s ? s[1] : "Onbekende regels";
-        skipped[label] = (skipped[label] || 0) + 1;
-        if (!s) warnings.push(`${src}: onbekend type '${l.desc}', overgeslagen.`);
+        addCash(s ? s[1] : "ANDERE", l, s ? {} : { remark: "onbekend type", warn: true });
+        if (!s) warnings.push(`${src}: onbekend type '${l.desc}', niet als transactie ingelezen (wel als geldbeweging).`);
       }
     }
 
@@ -1045,12 +1217,16 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
         ? t.type === "DIVIDEND" && D(t.amount).eq(want)
         : t.type === (s.isSell ? "SELL" : "BUY") && D(t.quantity).eq(s.qty)
           && (D(t.price).mul(t.quantity).add(t.fees).sub(want).round(2).isZero() || D(t.price).mul(t.quantity).sub(t.fees).sub(want).round(2).isZero())));
-      if (idx >= 0) out[idx]._cancelled = true;
-      else warnings.push(`${fileName}:${s.l.n}: correctie '${s.l.desc}' zonder overeenkomstige boeking, overgeslagen.`);
+      if (idx >= 0) {
+        const t = out[idx]; t._cancelled = true;
+        addCash("STORNO", lineOf.get(t), { status: "verwerkt", remark: "geannuleerd door een correctieboeking", importId: "c" + t.import_id });
+        addCash("STORNO", s.l, { status: "verwerkt", remark: "correctieboeking" });
+      } else {
+        addCash("STORNO", s.l, { remark: "correctie zonder overeenkomstige boeking", warn: true });
+        warnings.push(`${fileName}:${s.l.n}: correctie '${s.l.desc}' zonder overeenkomstige boeking, niet als transactie ingelezen (wel als geldbeweging).`);
+      }
     }
     const transactions = out.filter(t => !t._cancelled);
-    const cancelled = out.length - transactions.length;
-    if (cancelled) skipped["Geannuleerde boekingen (storno)"] = cancelled * 2;
 
     // fotowaarde afleiden uit Bolero's eigen resultaat bij verkopen in 2026+
     // (enkel als het volledig verkochte deel uit lots van vóór 2026 komt)
@@ -1090,7 +1266,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     if (short.length)
       warnings.unshift(`De export loopt van ${period[0]} tot ${period[1]} en bevat niet alle aankopen voor: ${[...new Set(short)].join(", ")}. ` +
         "Importeer ook een export vanaf je eerste aankoop (of voeg de aankopen zelf toe), anders kan de meerwaarde niet berekend worden.");
-    return { transactions, skipped, warnings, refHints, assets, positions, fileName, rows: lines.length, period, incomplete: [...new Set(short)] };
+    return { transactions, cash, skipped, warnings, refHints, assets, positions, fileName, rows: lines.length, period, incomplete: [...new Set(short)] };
   }
 
   const api = { parseBolero, parseBoleroRows, parseBoleroSheets, rowsFromSheet, beNum, duplicateFlags, contentKey, parseCsv, assetName, nameKey };
@@ -1214,6 +1390,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
   const node = typeof module !== "undefined" && module.exports;
   const M = node ? require("./engine.js") : root.MWB;
   const X = node ? require("./xlsx.js") : root.XLSX_LITE;
+  const G = node ? require("./geld.js") : root.GELD;
   const { D, ZERO } = M;
 
   const norm = s => String(s ?? "").replace(/ /g, " ").replace(/\s+/g, " ").trim().toLowerCase();
@@ -1316,7 +1493,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     for (const { g, n } of spare) {
       const m = /^\s*(koop|verkoop)\s+(-?[\d.,]+)\s*@\s*([\d.,]+)/i.exec(str(g("acties")));
       const q = m && num(m[2]), p = m && num(m[3]);
-      if (!q || q.isZero() || !p) { unmatched.push(`${bName}:${n}`); continue; }
+      if (!q || q.isZero() || !p) { unmatched.push({ g, n, sheet: bName }); continue; }
       const qty = /^verkoop$/i.test(m[1]) ? (q.lt(0) ? q : q.neg()) : abs(q);
       const v = {
         "aangepaste transactiedatum": g("transactiedatum"), "boekingsbedrag (eur)": g("boekingsbedrag"), "traded quantity": qty.toString(),
@@ -1325,7 +1502,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
       };
       rows.push(COMBINED.map(k => (k in v ? v[k] : g(k))));
     }
-    return { rows, cash, splits, dupes: dupes.length, unmatched,
+    return { rows, cash, splits, dupes, unmatched,
       bookedCcy: [...booked.values(), ...loose].map(b => str(b.g("valuta")).toUpperCase()).filter(c => c && c !== "EUR") };
   }
 
@@ -1364,8 +1541,9 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
       }
     }
 
-    const out = [], warnings = [], skipped = {}, assets = {}, delistInfo = new Map();
+    const out = [], warnings = [], skipped = {}, assets = {}, delistInfo = new Map(), cash = [];
     const count = k => { skipped[k] = (skipped[k] || 0) + 1; };
+    const cashId = G.idMaker("s:cash:");
     const seen = new Map();
     let firstDate = null, lastDate = null;
     const lines = T.rows.filter(({ r }) => r.some(v => v != null && v !== "")).reverse(); // export is aflopend
@@ -1408,7 +1586,15 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
       const type = norm(r[c.type]);
       const date = X.excelDate(r[c.tradeDate] ?? r[c.date]) || X.excelDate(r[c.date]);
       if (!date) { warnings.push(`${src}: geen geldige datum, overgeslagen.`); continue; }
-      if (type && type !== "transactie") { skipped[`Type '${r[c.type]}'`] = (skipped[`Type '${r[c.type]}'`] || 0) + 1; continue; }
+      if (type && type !== "transactie") {
+        // oude export: geldbewegingen staan op hetzelfde blad
+        const amt = num(r[c.amount]), action = String(r[c.action] ?? "").trim(), name = instrName(r);
+        const kind = type === "storting/opname" ? (amt && amt.lt(0) ? "OPNAME" : "STORTING") : "ANDERE";
+        cash.push({ kind, date, amount: amt ? amt.toString() : null, currency: "EUR", asset_name: name,
+          description: [String(r[c.type]).trim(), action].filter(Boolean).join(": "), status: "info", remark: "", owner, broker,
+          import_id: cashId(String(r[c.txid] ?? "").trim(), date, type, action, amt, name), import_source: src });
+        continue;
+      }
       const oc = norm(r[c.openClose]);
       const ownIsin = String(r[c.isin] ?? "").trim().toUpperCase();
       const symbol = String(r[c.symbol] ?? "").trim();
@@ -1471,11 +1657,18 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
 
     const withheld = {};
     if (combo?.unmatched.length) {
-      skipped["Boekingen zonder aantal of prijs"] = combo.unmatched.length;
-      warnings.push(`${fileName} (${combo.unmatched.join(", ")}): transactie zonder uitvoering en zonder leesbare omschrijving – niet geïmporteerd. Voeg ze zelf toe.`);
+      for (const { g, n, sheet } of combo.unmatched) {
+        const date = X.excelDate(g("transactiedatum")), amt = num(g("boekingsbedrag")), action = str(g("acties"));
+        if (!date) continue;
+        cash.push({ kind: "ANDERE", date, amount: amt ? amt.toString() : null, currency: str(g("valuta")).toUpperCase() || "EUR",
+          asset_name: str(g("instrument")), description: `Transactie zonder aantal of prijs: ${action || "zonder omschrijving"}`, status: "info",
+          remark: "niet als transactie ingelezen: voeg ze zelf toe", warn: true, owner, broker,
+          import_id: cashId(str(g("transactie-id")), date, "unmatched", action, amt), import_source: `${fileName} (${sheet}:${n})` });
+      }
+      warnings.push(`${fileName} (${combo.unmatched.map(u => `${u.sheet}:${u.n}`).join(", ")}): transactie zonder uitvoering en zonder leesbare omschrijving – niet geïmporteerd. Voeg ze zelf toe.`);
     }
     if (combo) {
-      const extra = corporateActions(combo, { out, warnings, skipped, assets, assetKey, owner, broker, fileName, sheets: all });
+      const extra = corporateActions(combo, { out, cash, cashId, warnings, skipped, assets, assetKey, owner, broker, fileName, sheets: all });
       Object.assign(withheld, extra.withheld);
     }
 
@@ -1498,7 +1691,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     const wYears = Object.keys(withheld);
     if (wYears.length) warnings.push(`Saxo hield meerwaardebelasting in: ${wYears.map(y => `${y}: € ${withheld[y]}`).join(", ")}. Dit bedrag wordt bij 'Ingehouden door broker' opgeteld.`);
     else if (!combo) warnings.push("Deze export toont geen door Saxo ingehouden meerwaardebelasting. Controleer op je Saxo-overzicht of er iets ingehouden werd; zo niet, dan geef je deze meerwaarden zelf aan.");
-    return { source: "saxo", transactions: out, withheld, skipped, warnings, refHints: {}, assets, positions, delistings, fileName, rows: lines.length, period: [firstDate, lastDate] };
+    return { source: "saxo", transactions: out, cash, withheld, skipped, warnings, refHints: {}, assets, positions, delistings, fileName, rows: lines.length, period: [firstDate, lastDate] };
   }
   const Dmin = (a, b) => (a.lte(b) ? a : b);
 
@@ -1506,7 +1699,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
    * Standaardexport: dividenden, splitsingen, andere corporate actions en ingehouden meerwaardebelasting.
    * Voegt transacties toe aan `out` en geeft { withheld: { jaar: bedrag } } terug.
    */
-  function corporateActions(combo, { out, warnings, skipped, assets, assetKey, owner, broker, fileName, sheets }) {
+  function corporateActions(combo, { out, cash, cashId, warnings, skipped, assets, assetKey, owner, broker, fileName, sheets }) {
     const count = k => { skipped[k] = (skipped[k] || 0) + 1; };
     let Bk = null;
     for (const [, rows] of sheets) if ((Bk = tableFrom(rows, ["amount type", "boekingsbedrag", "boekingsdatum"]))) break;
@@ -1531,33 +1724,47 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     }
     const withheld = Object.fromEntries(Object.entries(withheldD).filter(([, v]) => !v.isZero()).map(([y, v]) => [y, v.round(2).toString()]));
 
+    // geldbeweging ter info (telt niet mee voor de belasting)
+    const addCash = (kind, g, src, { status = "info", remark = "", warn = false, amount, date, description, currency } = {}) => {
+      const d = date || X.excelDate(g("transactiedatum")), amt = amount !== undefined ? amount : num(g("boekingsbedrag"));
+      if (!d) return;
+      const action = str(g("acties"));
+      cash.push({ kind, date: d, amount: amt ? amt.toString() : amt === null ? null : "0", currency: currency || str(g("valuta")).toUpperCase() || "EUR",
+        asset_name: nameOf(g), description: description ?? (action || str(g("transactietype"))), status, remark, ...(warn ? { warn } : {}), owner, broker,
+        import_id: cashId(str(g("transactie-id")), str(g("bk record id")), str(g("corporate action-id")), d, kind, action, amt), import_source: src });
+    };
+
     // dividenden: per corporate action netto (incl. terugboekingen)
     const divs = new Map();
     for (const { g, n, sheet } of combo.cash) {
       const type = norm(g("transactietype")), action = str(g("acties")), src = `${fileName} (${sheet}:${n})`;
       const date = X.excelDate(g("transactiedatum")), amt = num(g("boekingsbedrag"));
-      if (type === "storting/opname") { count("Stortingen en opnames"); continue; }
-      if (type !== "corporate action") { count(`Type '${str(g("transactietype")) || "leeg"}'`); continue; }
+      if (type === "storting/opname") { addCash(amt && amt.lt(0) ? "OPNAME" : "STORTING", g, src); continue; }
+      if (type !== "corporate action") { addCash("ANDERE", g, src, { description: [str(g("transactietype")), action].filter(Boolean).join(": ") }); continue; }
       if (/dividend/i.test(action) && date && amt) {
         const key = str(g("corporate action-id")) || `${str(g("instrument isin"))}|${date}`;
-        const d = divs.get(key) || { g, sum: ZERO, date: null, actions: new Set(), src };
-        d.sum = d.sum.add(amt); d.actions.add(action.replace(/\s*-\s*reversal$/i, ""));
+        const d = divs.get(key) || { g, sum: ZERO, date: null, actions: new Set(), src, lines: [] };
+        d.sum = d.sum.add(amt); d.actions.add(action.replace(/\s*-\s*reversal$/i, "")); d.lines.push({ g, src });
         if (amt.gt(ZERO) && (!d.date || date < d.date)) { d.date = date; d.g = g; d.src = src; }
         divs.set(key, d);
-      } else if (!action && mwbRecords.has(str(g("bk record id")))) count("Ingehouden meerwaardebelasting (apart geboekt)");
-      else if (/splitsing|split|fractie/i.test(action)) count("Cash bij splitsingen (fracties)");
-      else if (/bod|overname|uitkoop/i.test(action)) count("Cash bij overnamebiedingen (verwerkt als verkoop)");
+      } else if (!action && mwbRecords.has(str(g("bk record id"))))
+        addCash("MWB", g, src, { status: "verwerkt", remark: "al bij 'Ingehouden door broker'", description: "Ingehouden meerwaardebelasting" });
+      else if (/splitsing|split|fractie/i.test(action)) addCash("FRACTIE", g, src, { status: "verwerkt", remark: "al verwerkt als verkoop van de fractie" });
+      else if (/bod|overname|uitkoop/i.test(action)) addCash("BOD", g, src, { status: "verwerkt", remark: "al verwerkt als verkoop" });
       else if (/vermindering|terugbetaling/i.test(action)) {
-        count("Kapitaalverminderingen");
-        warnings.push(`${src}: ${action} ${nameOf(g)} op ${date}: € ${amt} ontvangen. Niet geïmporteerd: dit is geen verkoop. ` +
+        addCash("KAPVERM", g, src, { remark: "laat nakijken of dit de aanschaf- of fotowaarde verlaagt", warn: true });
+        warnings.push(`${src}: ${action} ${nameOf(g)} op ${date}: € ${amt} ontvangen. Niet als transactie geïmporteerd (wel als geldbeweging): dit is geen verkoop. ` +
           "Of een kapitaalvermindering de aanschaf- of fotowaarde verlaagt, regelt de wet niet uitdrukkelijk – laat dit nakijken.");
       } else {
-        count("Andere corporate actions");
-        warnings.push(`${src}: corporate action '${action || "zonder omschrijving"}' (${nameOf(g)}, ${date}, € ${amt ?? "?"}) niet geïmporteerd. Controleer de betrokken positie.`);
+        addCash("CA", g, src, { remark: "controleer de betrokken positie", warn: true });
+        warnings.push(`${src}: corporate action '${action || "zonder omschrijving"}' (${nameOf(g)}, ${date}, € ${amt ?? "?"}) niet als transactie geïmporteerd. Controleer de betrokken positie.`);
       }
     }
     for (const [key, d] of divs) {
-      if (!d.date || !d.sum.gt(ZERO)) { count("Teruggeboekte dividenden"); continue; }
+      if (!d.date || !d.sum.gt(ZERO)) {
+        for (const { g, src } of d.lines) addCash("DIV_TERUG", g, src, { remark: "dividend en terugboeking heffen elkaar op" });
+        continue;
+      }
       out.push({ ...base, type: "DIVIDEND", trade_date: d.date, asset: assetOf(d.g), amount: d.sum.round(2).toString(), quantity: "0", price: "0",
         split_ratio: null, note: `netto; ${[...d.actions].join(", ")}`, import_id: `s:div:${key}`, import_source: d.src });
     }
@@ -1598,7 +1805,13 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
       }
       warnings.push(msg + ".");
     }
-    if (combo.dupes) skipped["Dubbele regels bij corporate actions"] = combo.dupes;
+    for (const e of combo.dupes) {
+      const v = num(e.g("verhandelde waarde"));
+      addCash("DUBBEL", e.g, `${fileName} (_Transacties:${e.n})`, { status: "verwerkt", remark: "kopie van een andere regel, telt niet",
+        date: X.excelDate(e.g("aangepaste transactiedatum") ?? e.g("trade execution date")), amount: v ?? null,
+        description: `${str(e.g("acties")) || "corporate action"} (${num(e.g("traded quantity")) ?? "?"} stuks)`,
+        currency: str(e.g("instrumentvaluta")).toUpperCase() || "EUR" });
+    }
     if (combo.bookedCcy.length) warnings.push(`Je Saxo-rekening boekt in ${[...new Set(combo.bookedCcy)].join(", ")}: dividenden en kosten zijn als EUR overgenomen. Controleer ze.`);
     return { withheld };
   }
@@ -1952,6 +2165,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
 <script>"use strict";
 /* Interface + opslag. Alle berekeningen via MWB (engine.js). */
 const { D, Dec, calculate, defaultConfig } = window.MWB;
+const GELD = window.GELD;
 
 const TYPE_LABELS = {
   BUY: "Aankoop", SELL: "Verkoop", SPLIT: "Splitsing", DIVIDEND: "Dividend", FEE: "Kosten",
@@ -1983,7 +2197,7 @@ const signClass = v => Number(v) > 0 ? "pos" : Number(v) < 0 ? "neg" : "";
 // ================================================================ toestand
 function emptyState() {
   return {
-    version: 1, nextId: 1, transactions: [], assets: {}, withheld: [],
+    version: 1, nextId: 1, transactions: [], cash: [], assets: {}, withheld: [],
     years: { 2026: { rate: "0.10", base_exemption: "10000", carry_slice: "1000", carry_validity_years: 5,
                      source: "Wet 6.4.2026 (BS 21.4.2026); vrijstelling 2026 = 10.000 EUR" } },
     settings: { historic_method: "FIFO", fifo_scope: "EIGENAAR" },
@@ -1992,8 +2206,10 @@ function emptyState() {
 let state = emptyState();
 
 function validState(s) {
-  return s && typeof s === "object" && Array.isArray(s.transactions) && s.assets && typeof s.assets === "object"
+  const ok = s && typeof s === "object" && Array.isArray(s.transactions) && s.assets && typeof s.assets === "object"
     && s.years && s.settings && Array.isArray(s.withheld);
+  if (ok && !Array.isArray(s.cash)) s.cash = []; // opgeslagen vóór er geldbewegingen waren
+  return ok;
 }
 
 // ================================================================ opslag
@@ -2263,7 +2479,7 @@ function renderReport() {
           Zie de verkopen met een uitroepteken. Bij opt-in houdt de broker in op de waarde van 31/12/2025;
           de historische prijs roep je zelf in via je aangifte.</div>` : ""}
       </article>`;
-    }).join("");
+    }).join("") + cashCards();
   }
 
   // open verkopen blijven open na een wijziging (bv. de waarde op 31/12/2025 bewaren)
@@ -2300,6 +2516,26 @@ function renderReport() {
 
 /** Waarde 31/12/2025 van het verkochte effect rechtstreeks bij de verkoop aanpassen
  *  (enkel als de verkoop loten van vóór 2026 bevat; dezelfde waarde als op het tabblad Activa). */
+/** Geldoverzicht per eigenaar en jaar (enkel ter info), naast de jaarkaarten van het rapport. */
+function cashCards() {
+  const owners = [...new Set(state.cash.map(c => c.owner))].sort();
+  return owners.flatMap(owner => GELD.summary(state.cash, state.transactions, state.withheld, { owner }).rows.slice().reverse().map(y => {
+    const f = v => eur(v.toFixed(2));
+    return `<article class="card"><h4><span>Geldoverzicht ${esc(y.year)}</span><span class="muted small">${esc(owner)} · info</span></h4>
+      <dl class="kv">
+        <dt>Gestort</dt><dd class="pos">${f(y.deposits)}</dd>
+        <dt>Opgenomen</dt><dd class="neg">${f(y.withdrawals)}</dd>
+        <dt class="strong">Netto inbreng</dt><dd class="strong">${f(y.net)}</dd>
+        <div class="sep"></div>
+        <dt>Dividend (netto)</dt><dd>${f(y.dividends)}</dd>
+        ${y.capital_reductions.isZero() ? "" : `<dt>Kapitaalverminderingen</dt><dd>${f(y.capital_reductions)}</dd>`}
+        ${y.withheld.isZero() ? "" : `<dt>Ingehouden meerwaardebelasting</dt><dd>${f(y.withheld)}</dd>`}
+      </dl>
+      <p class="hint">Telt niet mee voor de belasting. <a href="#transacties" data-show-cash>Toon de geldbewegingen</a></p></article>`;
+  })).join("");
+}
+document.addEventListener("click", e => { if (e.target.closest("[data-show-cash]")) txShow = "cash"; });
+
 function saleRefEditor(s) {
   if (!s.lines.some(l => l.acquired && l.acquired < "2026-01-01")) return "";
   const a = state.assets[s.asset] || {}, ccy = (a.currency || "EUR").toUpperCase();
@@ -2465,23 +2701,42 @@ function reportPdf(now = new Date()) {
 }
 
 // ================================================================ transacties
+let txShow = "all"; // tx | cash | all
 function renderTransactions() {
-  const all = state.transactions;
-  fillFilter("#f-year", [...new Set(all.map(t => t.trade_date.slice(0, 4)))].sort().reverse());
-  fillFilter("#f-owner", [...new Set(all.map(t => t.owner))].sort());
+  const all = state.transactions, cash = state.cash;
+  fillFilter("#f-year", [...new Set([...all.map(t => t.trade_date.slice(0, 4)), ...cash.map(c => c.date.slice(0, 4))])].sort().reverse());
+  fillFilter("#f-owner", [...new Set([...all.map(t => t.owner), ...cash.map(c => c.owner)])].sort());
   $("#asset-list").innerHTML = Object.keys(state.assets).map(a => `<option value="${esc(a)}">`).join("");
   $("#owner-list").innerHTML = [...new Set([DEFAULT_OWNER, ...all.map(t => t.owner)])].map(o => `<option value="${esc(o)}">`).join("");
-  const fy = $("#f-year").value, fo = $("#f-owner").value, fa = $("#f-asset").value.trim().toUpperCase(), fp = $("#f-proof").value;
+  const showTx = txShow !== "cash", showCash = txShow !== "tx";
+  const kinds = [...(showTx ? Object.keys(TYPE_LABELS).filter(k => all.some(t => t.type === k)).map(k => [k, TYPE_LABELS[k]]) : []),
+    ...(showCash ? Object.keys(GELD.KINDS).filter(k => cash.some(c => c.kind === k)).map(k => ["cash:" + k, GELD.label(k)]) : [])];
+  const fk = $("#f-kind"), curKind = fk.value;
+  fk.innerHTML = `<option value="">Alle</option>` + kinds.map(([k, l]) => `<option value="${esc(k)}">${esc(l)}</option>`).join("");
+  fk.value = kinds.some(([k]) => k === curKind) ? curKind : "";
+  const fy = $("#f-year").value, fo = $("#f-owner").value, fa = $("#f-asset").value.trim().toUpperCase(), fp = $("#f-proof").value, fkind = fk.value;
   const missing = new Set(window.BEWIJS.missingProof(all, heldKeys()).map(t => t.id));
-  $("#proof-missing").hidden = !missing.size || fp === "zonder";
+  $("#proof-missing").hidden = !missing.size || fp === "zonder" || !showTx;
   $("#proof-missing").textContent = `${missing.size === 1 ? "1 transactie" : `${missing.size} transacties`} van activa in bezit of belastbare verkopen ${missing.size === 1 ? "heeft" : "hebben"} nog geen bewijsstuk. Kies 'Bewijs ontbreekt' om ze te tonen.`;
   const hasProof = t => (t.attachments || []).length > 0;
-  const rows = all.filter(t => (!fy || t.trade_date.startsWith(fy)) && (!fo || t.owner === fo) && (!fa || t.asset.includes(fa))
-      && (!fp || (fp === "met" ? hasProof(t) : missing.has(t.id))))
-    .sort((a, b) => a.trade_date < b.trade_date ? 1 : a.trade_date > b.trade_date ? -1 : b.id - a.id);
+  const txRows = !showTx || fkind.startsWith("cash:") ? [] : all.filter(t => (!fy || t.trade_date.startsWith(fy)) && (!fo || t.owner === fo)
+      && (!fa || t.asset.includes(fa)) && (!fkind || t.type === fkind) && (!fp || (fp === "met" ? hasProof(t) : missing.has(t.id))));
+  // het bewijsfilter geldt enkel voor transacties
+  const cashRows = !showCash || fp || (fkind && !fkind.startsWith("cash:")) ? [] : cash.filter(c => (!fy || c.date.startsWith(fy)) && (!fo || c.owner === fo)
+      && (!fa || `${c.asset_name} ${c.description}`.toUpperCase().includes(fa)) && (!fkind || "cash:" + c.kind === fkind));
+  const rows = [...txRows.map(t => ({ date: t.trade_date, id: t.id, t })), ...cashRows.map(c => ({ date: c.date, id: c.id, c }))]
+    .sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : b.id - a.id);
+  const total = (showTx ? all.length : 0) + (showCash ? cash.length : 0);
   $("#tx-empty").hidden = rows.length > 0;
-  $("#tx-count").textContent = all.length ? `${rows.length} van ${all.length}` : "";
-  $("#tx-table tbody").innerHTML = rows.map(t => {
+  $("#tx-count").textContent = total ? `${rows.length} van ${total}` : "";
+  const counts = { tx: all.length, cash: cash.length, all: all.length + cash.length };
+  $$("#f-show button").forEach(b => { b.classList.toggle("on", b.dataset.show === txShow); $(".n", b).textContent = counts[b.dataset.show]; });
+  $("#f-show").closest("label").hidden = !cash.length;
+  $("#f-proof").closest("label").hidden = txShow === "cash";
+  renderCashSummary(showCash && cash.length ? { owner: fo, year: fy } : null);
+  $("#tx-table tbody").innerHTML = rows.map(({ t, c }) => t ? txRow(t, hasProof, missing) : cashRow(c)).join("");
+}
+function txRow(t, hasProof, missing) {
     const amt = t.type === "DIVIDEND" || t.type === "FEE";
     const value = t.type === "SPLIT" ? `${num(t.split_ratio)} : 1` : amt ? num(t.amount)
       : t.type === "DELISTING" ? (t.delist_mode === "UITKOOP" ? num(t.price) : "")
@@ -2499,7 +2754,31 @@ function renderTransactions() {
       <td>${esc(t.currency)}${t.currency !== "EUR" ? ` <span class="muted small" title="${esc(fxLabel(t))}">@${hasVal(t.eur_per_ccy) ? `${num(t.eur_per_ccy)} EUR` : num(t.fx_per_eur)}</span>` : ""}</td>
       <td>${esc(t.owner)}</td><td>${esc(t.broker)}</td>
       <td class="actions-cell"><button class="btn small danger" data-del="${t.id}" aria-label="Verwijder">✕</button></td></tr>`;
-  }).join("");
+}
+function cashRow(c) {
+  const v = c.amount == null || c.amount === "" ? null : D(c.amount);
+  const dir = c.status === "verwerkt" || !v ? "" : v.gt(0) ? "in" : v.lt(0) ? "out" : "";
+  const what = [c.asset_name, c.description && c.description !== c.asset_name ? c.description : ""].filter(Boolean).join(" – ");
+  const note = c.remark ? `<span class="cash-note ${c.status === "verwerkt" ? "done" : c.warn ? "warn" : ""}">${esc(c.remark)}</span>` : "";
+  return `<tr data-cash="${c.id}" class="clickable info" title="Geldbeweging (enkel ter info). Tik voor details.">
+    <td>${esc(c.date)}</td><td><span class="badge cash ${dir}">${esc(GELD.label(c.kind))}</span></td>
+    <td class="cash-what">${esc(what)}${note}${c.note ? `<span class="cash-note">${esc(c.note)}</span>` : ""}</td>
+    <td class="num"></td><td class="num ${v && v.lt(0) ? "neg" : ""}">${v ? num(v.toString()) : "–"}</td>
+    <td>${esc(c.currency || "EUR")}</td><td>${esc(c.owner)}</td><td>${esc(c.broker)}</td>
+    <td class="actions-cell"><button class="btn small danger" data-delcash="${c.id}" aria-label="Verwijder">✕</button></td></tr>`;
+}
+function renderCashSummary(filter) {
+  const box = $("#cash-summary");
+  const s = filter && GELD.summary(state.cash, state.transactions, state.withheld, filter);
+  box.hidden = !s || !s.rows.length;
+  if (box.hidden) return;
+  const cell = (v, cls = "") => `<td class="num ${cls}">${eur(v.toFixed(2))}</td>`;
+  const line = r => `<tr><td>${esc(r.year)}</td>${cell(r.deposits, "pos")}${cell(r.withdrawals, "neg")}<td class="num"><strong>${eur(r.net.toFixed(2))}</strong></td>
+    ${cell(r.dividends)}${cell(r.capital_reductions)}${cell(r.withheld)}</tr>`;
+  $("tbody", box).innerHTML = s.rows.map(line).join("");
+  $("tfoot", box).innerHTML = s.rows.length > 1 ? line(s.total) : "";
+  $("#cash-summary-hint").textContent = "Netto inbreng = gestort − opgenomen, volgens de geïmporteerde exports. Dividend = netto ontvangen dividenden min terugboekingen. " +
+    "Telt niet mee voor de belasting." + (s.foreign ? ` ${s.foreign} ${s.foreign === 1 ? "geldbeweging" : "geldbewegingen"} in een andere munt dan EUR ${s.foreign === 1 ? "is" : "zijn"} niet meegeteld.` : "");
 }
 function fillFilter(sel, values) {
   const el = $(sel), cur = el.value;
@@ -2606,10 +2885,46 @@ function deleteTx(id) {
 $("#tx-table").addEventListener("click", async e => {
   const del = e.target.closest("[data-del]");
   if (del) { e.stopPropagation(); if (await confirmDialog(deleteQuestion(Number(del.dataset.del)))) deleteTx(Number(del.dataset.del)); return; }
+  const delc = e.target.closest("[data-delcash]");
+  if (delc) { e.stopPropagation(); if (await confirmDialog("Deze geldbeweging verwijderen?")) deleteCash(Number(delc.dataset.delcash)); return; }
   const row = e.target.closest("tr[data-id]");
-  if (row) openTxDialog(state.transactions.find(t => t.id === Number(row.dataset.id)));
+  if (row) return openTxDialog(state.transactions.find(t => t.id === Number(row.dataset.id)));
+  const crow = e.target.closest("tr[data-cash]");
+  if (crow) openCashDialog(state.cash.find(c => c.id === Number(crow.dataset.cash)));
 });
-["#f-year", "#f-owner", "#f-proof"].forEach(s => $(s).addEventListener("change", renderTransactions));
+["#f-year", "#f-owner", "#f-proof", "#f-kind"].forEach(s => $(s).addEventListener("change", renderTransactions));
+$("#f-show").addEventListener("click", e => {
+  const b = e.target.closest("button[data-show]"); if (!b) return;
+  txShow = b.dataset.show; renderTransactions();
+});
+
+// ================================================================ geldbewegingen (enkel ter info)
+let editingCash = null;
+function openCashDialog(c) {
+  if (!c) return;
+  editingCash = c.id;
+  $("#cash-title").textContent = `${GELD.label(c.kind)} op ${c.date}`;
+  const v = c.amount == null || c.amount === "" ? "–" : `${num(c.amount)} ${c.currency || "EUR"}`;
+  const dd = (k, val) => val ? `<dt>${k}</dt><dd style="text-align:left;white-space:normal">${esc(val)}</dd>` : "";
+  $("#cash-details").innerHTML = dd("Bedrag", v) + dd("Effect", c.asset_name) + dd("Omschrijving", c.description)
+    + dd(c.status === "verwerkt" ? "Al verwerkt" : "Opmerking", c.remark) + dd("Eigenaar", c.owner) + dd("Broker", c.broker) + dd("Bron", c.import_source);
+  $("#cash-note").value = c.note || "";
+  $("#cash-dialog").showModal();
+}
+function deleteCash(id) {
+  state.cash = state.cash.filter(c => c.id !== id);
+  commit(); toast("Geldbeweging verwijderd. Een nieuwe import van dezelfde export voegt ze opnieuw toe.");
+}
+$("#cash-cancel").addEventListener("click", () => $("#cash-dialog").close());
+$("#cash-save").addEventListener("click", () => {
+  const c = state.cash.find(x => x.id === editingCash);
+  if (c) { const n = $("#cash-note").value.trim(); if (n) c.note = n; else delete c.note; commit(); }
+  $("#cash-dialog").close();
+});
+$("#cash-delete").addEventListener("click", async () => {
+  const id = editingCash; $("#cash-dialog").close();
+  if (await confirmDialog("Deze geldbeweging verwijderen?")) deleteCash(id);
+});
 $("#f-asset").addEventListener("input", renderTransactions);
 
 // ================================================================ bewijsstukken
@@ -3031,9 +3346,10 @@ async function importBackup(text) {
   const { state: s, files } = window.BEWIJS.splitBackup(parsed);
   if (!validState(s)) return toast("Dit bestand heeft niet de vorm van een back-up van deze tool.", true);
   const nf = Object.keys(files).length;
-  if (!(await confirmDialog(`Back-up met ${s.transactions.length} transacties${nf ? ` en ${nf} bewijsstukken` : ""} herstellen? Je huidige gegevens worden vervangen.`))) return;
+  const nc = s.cash.length;
+  if (!(await confirmDialog(`Back-up met ${s.transactions.length} transacties${nc ? `, ${nc} geldbewegingen` : ""}${nf ? ` en ${nf} bewijsstukken` : ""} herstellen? Je huidige gegevens worden vervangen.`))) return;
   const previous = window.BEWIJS.allAttachments(state.transactions);
-  state = s; state.nextId = Math.max(state.nextId || 1, ...state.transactions.map(t => t.id + 1));
+  state = s; state.nextId = Math.max(state.nextId || 1, ...state.transactions.map(t => t.id + 1), ...state.cash.map(c => (c.id || 0) + 1));
   migrateToNames();
   $("#import-text").value = ""; commit(); toast("Back-up hersteld");
   if (nf) await restoreProofFiles(files, previous);
@@ -3120,10 +3436,22 @@ function openImportDialog(r) {
   const fresh = r.transactions.filter((t, i) => !dupFlags[i]);
   const cnt = type => fresh.filter(t => t.type === type).length;
   const dup = r.transactions.length - fresh.length;
+  const freshCash = GELD.fresh(state.cash, r.cash), dupCash = (r.cash || []).length - freshCash.length;
   $("#imp-summary").innerHTML = `<strong>${esc(r.fileName)}</strong>: ${r.rows} regels gelezen.
-    Nieuw: ${cnt("BUY")} aankopen, ${cnt("SELL")} verkopen, ${cnt("DIVIDEND")} dividenden.
-    ${dup ? `<br>${dup} transacties waren al eerder geïmporteerd en worden overgeslagen.` : ""}`;
+    Nieuw: ${cnt("BUY")} aankopen, ${cnt("SELL")} verkopen, ${cnt("DIVIDEND")} dividenden${freshCash.length ? `, ${freshCash.length} ${freshCash.length === 1 ? "geldbeweging" : "geldbewegingen"}` : ""}.
+    ${dup ? `<br>${dup} transacties waren al eerder geïmporteerd en worden overgeslagen.` : ""}
+    ${dupCash ? `<br>${dupCash} ${dupCash === 1 ? "geldbeweging was" : "geldbewegingen waren"} al eerder geïmporteerd.` : ""}`;
+  const groups = GELD.groups(freshCash);
+  const list = gs => `<ul class="imp-list">${gs.map(g => `<li><span class="cnt">${g.count}</span><span class="grow">${esc(g.group)}${g.remark
+    ? `<span class="cash-note done">${esc(g.remark)}</span>` : ""}</span></li>`).join("")}</ul>`;
+  const news = groups.filter(g => g.status !== "verwerkt"), done = groups.filter(g => g.status === "verwerkt");
+  $("#imp-cash").innerHTML = (news.length ? `<div class="imp-sub">Nieuw in de tool</div>${list(news)}` : "")
+    + (done.length ? `<div class="imp-sub">Al verwerkt, nu ook zichtbaar als info</div>${list(done)}` : "");
+  $("#imp-cash-count").textContent = freshCash.length;
+  $("#imp-cash-wrap").hidden = !freshCash.length;
+  $("#imp-cash-add").checked = true;
   $("#imp-skipped").innerHTML = Object.entries(r.skipped).map(([k, v]) => `<li>${esc(k)}: ${v}</li>`).join("");
+  $("#imp-skipped-wrap").hidden = !Object.keys(r.skipped).length;
   $("#imp-owner").value = DEFAULT_OWNER;
   $("#imp-positions tbody").innerHTML = r.positions.map((p, i) => {
     const oldKey = [...(r.keyMoves || [])].find(([, to]) => to === p.asset)?.[0];
@@ -3213,6 +3541,8 @@ $("#imp-confirm").addEventListener("click", () => {
         split_ratio: null, import_id: id, note: `Delisting volgens ${r.source === "saxo" ? "Saxo" : "Bolero"}-export` });
       added++;
     }
+    let cashAdded = 0;
+    if ($("#imp-cash-add").checked) for (const c of GELD.fresh(state.cash, r.cash)) { state.cash.push({ ...c, owner, id: state.nextId++ }); cashAdded++; }
     for (const t of r.transactions) if (t.type === "DIVIDEND")
       state.assets[t.asset] ??= { name: "", asset_type: "aandeel", currency: t.currency, ref_value_eur: null, ref_source: "" };
     for (const { p, keep, ref } of decisions) {
@@ -3242,7 +3572,7 @@ $("#imp-confirm").addEventListener("click", () => {
     const missing = [...need.keys()].filter(a => needsRef(a) && !(state.assets[a]?.ref_value_eur));
     $("#import-dialog").close(); pendingImport = null;
     commit();
-    toast(`${added} transacties geïmporteerd` + (moved ? `; ${moved} ${moved === 1 ? "effect staat" : "effecten staan"} nu onder de naam` : "") + (missing.length ? `. Vul nog de waarde op 31/12/2025 in bij Activa voor: ${missing.map(a => state.assets[a]?.name || a).join(", ")}` : "")
+    toast(`${added} transacties` + (cashAdded ? ` en ${cashAdded} ${cashAdded === 1 ? "geldbeweging" : "geldbewegingen"}` : "") + " geïmporteerd" + (moved ? `; ${moved} ${moved === 1 ? "effect staat" : "effecten staan"} nu onder de naam` : "") + (missing.length ? `. Vul nog de waarde op 31/12/2025 in bij Activa voor: ${missing.map(a => state.assets[a]?.name || a).join(", ")}` : "")
       + (notMerged.length ? `. ${brokerName} hield meerwaardebelasting in (${notMerged.join(", ")}); je had voor dat jaar al zelf een bedrag ingevuld – pas het aan bij Instellingen als nodig` : ""),
       missing.length > 0 || notMerged.length > 0);
   } catch (err) { toast(err.message, true); }

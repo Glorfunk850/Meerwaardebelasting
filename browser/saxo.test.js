@@ -205,7 +205,8 @@ test("standaardexport: transacties uit _Transacties met bedragen en kosten uit T
   const bod = r.transactions.filter(t => t.import_id.startsWith("s:X5|"));
   assert.equal(bod.length, 1); assert.equal(bod[0].trade_date, "2026-07-01"); assert.equal(bod[0].type, "SELL");
   assert.equal(bod[0].asset, "GAMMA FOODS"); assert.ok(bod[0].note.includes("Openbaar overnamebod"));
-  assert.equal(r.skipped["Dubbele regels bij corporate actions"], 1);
+  const dub = r.cash.filter(c => c.kind === "DUBBEL");
+  assert.equal(dub.length, 1); assert.equal(dub[0].status, "verwerkt"); assert.equal(dub[0].date, "2026-10-01");
   // stockdividend = aankoop zonder kosten
   const x7 = tx("X7");
   assert.equal(x7.type, "BUY"); assert.equal(x7.quantity, "1"); assert.equal(x7.price, "31"); assert.equal(x7.fees, "0");
@@ -227,11 +228,23 @@ test("standaardexport: omgekeerde splitsing, dividenden, kapitaalvermindering en
   const divs = r.transactions.filter(t => t.type === "DIVIDEND");
   assert.deepEqual(divs.map(t => [t.asset, t.trade_date, t.amount]).sort(),
     [["ALFA BOUW NV", "2026-05-02", "30.8"], ["BETA CORP.", "2026-02-01", "8.5"]]);
-  assert.equal(r.skipped["Teruggeboekte dividenden"], 1);
-  assert.equal(r.skipped["Stortingen en opnames"], 1);
-  assert.equal(r.skipped["Kapitaalverminderingen"], 1);
+  // geldbewegingen: enkel ter info, met een verwijzing als ze al op een andere manier verwerkt zijn
+  assert.deepEqual(r.skipped, {});
+  const cash = kind => r.cash.filter(c => c.kind === kind).map(c => [c.date, c.amount, c.status, c.asset_name]).sort();
+  assert.deepEqual(cash("DIV_TERUG"), [["2026-04-10", "12", "info", "Delta Media N.V."], ["2026-04-20", "-12", "info", "Delta Media N.V."]]);
+  assert.deepEqual(cash("STORTING"), [["2026-01-20", "500", "info", ""]]);
+  assert.deepEqual(cash("KAPVERM"), [["2026-03-02", "25", "info", "Alfa Bouw NV"]]);
+  assert.ok(r.cash.find(c => c.kind === "KAPVERM").remark.includes("nakijken")); assert.equal(r.cash.find(c => c.kind === "KAPVERM").warn, true);
+  assert.ok(!r.cash.some(c => c.kind === "DIV_TERUG" && c.warn));
   assert.ok(r.warnings.some(w => w.includes("Waardevermindering") && w.includes("niet uitdrukkelijk")));
-  assert.equal(r.skipped["Ingehouden meerwaardebelasting (apart geboekt)"], 1);
+  assert.deepEqual(cash("MWB"), [["2026-10-01", "-20", "verwerkt", "Gamma Foods"]]);
+  assert.deepEqual(cash("BOD"), [["2026-07-01", "600", "verwerkt", "Gamma Foods"]]);
+  assert.deepEqual(cash("FRACTIE"), [["2025-11-18", "0", "verwerkt", "Delta Media N.V."], ["2025-12-02", "3.6", "verwerkt", "Delta Media N.V."]]);
+  assert.equal(r.cash.length, 9);
+  assert.ok(r.cash.every(c => c.owner === "ik" && c.broker === "Saxo" && c.currency === "EUR" && c.import_source.startsWith("std.xlsx (")));
+  const ids = r.cash.map(c => c.import_id);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.deepEqual(S.parseSaxoSheets(standardExport(), { owner: "ik", fileName: "std.xlsx" }).cash.map(c => c.import_id), ids);
   // ingehouden meerwaardebelasting per jaar
   assert.deepEqual(r.withheld, { 2026: "39" });
   assert.ok(r.warnings.some(w => w.includes("Saxo hield meerwaardebelasting in")));
@@ -290,7 +303,8 @@ test("standaardexport: uitvoeringen zonder (juiste) boeking en boekingen zonder 
   assert.equal(z5.type, "SELL"); assert.equal(z5.quantity, "3"); assert.equal(z5.price, "70"); assert.equal(z5.trade_date, "2026-10-20");
   assert.equal(z5.fees, M.D(3).mul(z5.fx_per_eur).round(2).toString()); assert.equal(z5.saxo_result, "25");
   assert.ok(r.warnings.some(w => w.includes("geen uitvoering in _Transacties")));
-  assert.equal(r.skipped["Boekingen zonder aantal of prijs"], 1);
+  const loose = r.cash.filter(c => c.description.startsWith("Transactie zonder aantal of prijs"));
+  assert.equal(loose.length, 1); assert.equal(loose[0].kind, "ANDERE"); assert.equal(loose[0].status, "info");
   assert.equal(new Set(r.transactions.map(t => t.import_id)).size, r.transactions.length);
   // de rekenkern kan alles verwerken
   const rep = M.calculate(r.transactions, { "ALFA BOUW NV": "25", "GAMMA FOODS": "130", "EPSILON LICHT NV": "21", "BETA CORP.": "55" });
@@ -305,4 +319,19 @@ test("oude export: uitgevoerde order zonder bedrag wordt ingelezen, een pending 
   const t8 = r.transactions.find(t => t.import_id.startsWith("s:T8|"));
   assert.equal(t8.type, "SELL"); assert.equal(t8.quantity, "5"); assert.equal(t8.fees, "0");
   assert.equal(r.skipped["Niet (volledig) uitgevoerde orders"], 1); // de pending order
+});
+
+test("oude export: stortingen en andere geldbewegingen op hetzelfde blad", () => {
+  const sh = sheets(), set = (r, k, v) => { r[H.indexOf(k)] = v; return r; };
+  const cash = (date, type, action, amount) => {
+    const r = row({ date, id: null, action, amount, costs: null, name: null, isin: null, qty: null, price: null });
+    set(r, "Type", null); set(r, "Openen/sluiten", null); return set(r, "Transactietype", type);
+  };
+  sh.Transacties.push(cash("2025-01-02", "Storting/opname", "Storting", 2000), cash("2026-02-03", "Storting/opname", "Opname", -300),
+    cash("2026-03-04", "Rente", "Debetrente", -1.25));
+  const r = S.parseSaxoSheets(sh, { fileName: "oud.xlsx" });
+  assert.deepEqual(r.cash.map(c => [c.kind, c.date, c.amount, c.status]).sort(),
+    [["ANDERE", "2026-03-04", "-1.25", "info"], ["OPNAME", "2026-02-03", "-300", "info"], ["STORTING", "2025-01-02", "2000", "info"]]);
+  assert.ok(r.cash.find(c => c.kind === "ANDERE").description.includes("Debetrente"));
+  assert.ok(!Object.keys(r.skipped).some(k => k.startsWith("Type")));
 });

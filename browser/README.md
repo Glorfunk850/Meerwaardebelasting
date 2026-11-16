@@ -15,6 +15,7 @@ De versie die op je claude.ai-link draait. Alles werkt in de browser; er is geen
 | `bolero.js` | Importer voor de Bolero-export "Cashbewegingen" (Excel of CSV) |
 | `saxo.js` | Importer voor de Saxo-export "Transacties" (standaard, Excel) en de oudere export "Trades" (Excel of CSV) |
 | `xlsx.js` | Minimale Excel-lezer zonder externe bibliotheek |
+| `geld.js` | Geldbewegingen (stortingen, opnames, kapitaalverminderingen, ...): soorten, dubbels, geldoverzicht per jaar |
 | `bewijs.js` | Bewijsstukken bij transacties: toegelaten bestandstypes, welke transacties nog een bewijs missen |
 | `pdf.js` | Rapport als PDF (minimale PDF-generator zonder externe bibliotheek, Helvetica met WinAnsi-tekens) |
 | `build.py` | Voegt alles samen tot `index.html` |
@@ -30,6 +31,7 @@ node --test bolero.test.js       # Bolero-importer (synthetisch bestand)
 node --test saxo.test.js         # Saxo-importer (synthetisch bestand)
 node --test bewijs.test.js       # bewijsstukken
 node --test pdf.test.js          # PDF-generator
+node --test geld.test.js         # geldbewegingen en geldoverzicht
 
 # optioneel tegen je eigen exports:
 BOLERO_FILE=pad/naar/cashmovements.xlsx node --test bolero.test.js   # of .csv
@@ -79,12 +81,26 @@ De filter *Bewijs ontbreekt* toont verwervingen van activa die nog in bezit zijn
   - (omgekeerde) splitsing: splitsing met de gangbare verhouding (bv. 1 nieuw voor 10 oud) plus verkoop van de fractie
     tegen het cashbedrag uit `Bookings`;
   - stockdividend (herbeleggingsdividend): aankoop tegen de prijs van Saxo, zonder kosten;
-  - kapitaalvermindering ("Waardevermindering"): niet geïmporteerd, met waarschuwing. **Open punt:** of zo'n
-    terugbetaling de aanschaf- of fotowaarde verlaagt, regelt de wet niet uitdrukkelijk.
+  - kapitaalvermindering ("Waardevermindering"): niet als transactie geïmporteerd (wel als geldbeweging), met
+    waarschuwing. **Open punt:** of zo'n terugbetaling de aanschaf- of fotowaarde verlaagt, regelt de wet niet uitdrukkelijk.
   - dividenden: netto per corporate action (terugboekingen afgetrokken).
 - Ingehouden meerwaardebelasting: Bolero (kolom bij elke verkoop) en Saxo (boekingen "Meerwaardebelasting" in `Bookings`)
   worden per jaar en per broker opgeteld bij *Ingehouden door broker*. Een zelf ingevuld bedrag blijft staan; een export
   verhoogt het bedrag van een broker enkel (een export die maar een deel van het jaar dekt, verlaagt het niet).
+
+## Geldbewegingen
+
+Regels uit een export die geen effect hebben op de belasting (stortingen, opnames, wisseltransacties, kapitaalverminderingen,
+teruggeboekte dividenden, storno's, ...) worden bij de import mee ingelezen als *geldbeweging* (uit te zetten in het
+importvenster). Ze worden apart bewaard (`cash` in de toestand en de back-up) en gaan nooit naar de rekenkern.
+Regels die al op een andere manier verwerkt zijn (ingehouden meerwaardebelasting, cash uit een overnamebod of voor een
+fractie, dubbele regels bij corporate actions, geannuleerde boekingen) krijgen de status *verwerkt* met een verwijzing.
+Een nieuwe import van dezelfde export voegt ze niet dubbel toe (import-id).
+
+Op het tabblad Transacties kies je *Transacties*, *Geldbewegingen* of *Alles*, en filter je per soort. Bij geldbewegingen
+staat een geldoverzicht per jaar: gestort, opgenomen, netto inbreng, dividend (netto, min terugboekingen),
+kapitaalverminderingen en ingehouden meerwaardebelasting. Het rapport toont hetzelfde per eigenaar en jaar als
+informatieve kaart. Enkel bedragen in EUR tellen mee in het overzicht. Het PDF-rapport bevat geen geldbewegingen.
 
 ## Rapport als PDF
 

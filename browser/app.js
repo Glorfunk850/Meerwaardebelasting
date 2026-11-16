@@ -1,6 +1,7 @@
 "use strict";
 /* Interface + opslag. Alle berekeningen via MWB (engine.js). */
 const { D, Dec, calculate, defaultConfig } = window.MWB;
+const GELD = window.GELD;
 
 const TYPE_LABELS = {
   BUY: "Aankoop", SELL: "Verkoop", SPLIT: "Splitsing", DIVIDEND: "Dividend", FEE: "Kosten",
@@ -32,7 +33,7 @@ const signClass = v => Number(v) > 0 ? "pos" : Number(v) < 0 ? "neg" : "";
 // ================================================================ toestand
 function emptyState() {
   return {
-    version: 1, nextId: 1, transactions: [], assets: {}, withheld: [],
+    version: 1, nextId: 1, transactions: [], cash: [], assets: {}, withheld: [],
     years: { 2026: { rate: "0.10", base_exemption: "10000", carry_slice: "1000", carry_validity_years: 5,
                      source: "Wet 6.4.2026 (BS 21.4.2026); vrijstelling 2026 = 10.000 EUR" } },
     settings: { historic_method: "FIFO", fifo_scope: "EIGENAAR" },
@@ -41,8 +42,10 @@ function emptyState() {
 let state = emptyState();
 
 function validState(s) {
-  return s && typeof s === "object" && Array.isArray(s.transactions) && s.assets && typeof s.assets === "object"
+  const ok = s && typeof s === "object" && Array.isArray(s.transactions) && s.assets && typeof s.assets === "object"
     && s.years && s.settings && Array.isArray(s.withheld);
+  if (ok && !Array.isArray(s.cash)) s.cash = []; // opgeslagen vóór er geldbewegingen waren
+  return ok;
 }
 
 // ================================================================ opslag
@@ -312,7 +315,7 @@ function renderReport() {
           Zie de verkopen met een uitroepteken. Bij opt-in houdt de broker in op de waarde van 31/12/2025;
           de historische prijs roep je zelf in via je aangifte.</div>` : ""}
       </article>`;
-    }).join("");
+    }).join("") + cashCards();
   }
 
   // open verkopen blijven open na een wijziging (bv. de waarde op 31/12/2025 bewaren)
@@ -349,6 +352,26 @@ function renderReport() {
 
 /** Waarde 31/12/2025 van het verkochte effect rechtstreeks bij de verkoop aanpassen
  *  (enkel als de verkoop loten van vóór 2026 bevat; dezelfde waarde als op het tabblad Activa). */
+/** Geldoverzicht per eigenaar en jaar (enkel ter info), naast de jaarkaarten van het rapport. */
+function cashCards() {
+  const owners = [...new Set(state.cash.map(c => c.owner))].sort();
+  return owners.flatMap(owner => GELD.summary(state.cash, state.transactions, state.withheld, { owner }).rows.slice().reverse().map(y => {
+    const f = v => eur(v.toFixed(2));
+    return `<article class="card"><h4><span>Geldoverzicht ${esc(y.year)}</span><span class="muted small">${esc(owner)} · info</span></h4>
+      <dl class="kv">
+        <dt>Gestort</dt><dd class="pos">${f(y.deposits)}</dd>
+        <dt>Opgenomen</dt><dd class="neg">${f(y.withdrawals)}</dd>
+        <dt class="strong">Netto inbreng</dt><dd class="strong">${f(y.net)}</dd>
+        <div class="sep"></div>
+        <dt>Dividend (netto)</dt><dd>${f(y.dividends)}</dd>
+        ${y.capital_reductions.isZero() ? "" : `<dt>Kapitaalverminderingen</dt><dd>${f(y.capital_reductions)}</dd>`}
+        ${y.withheld.isZero() ? "" : `<dt>Ingehouden meerwaardebelasting</dt><dd>${f(y.withheld)}</dd>`}
+      </dl>
+      <p class="hint">Telt niet mee voor de belasting. <a href="#transacties" data-show-cash>Toon de geldbewegingen</a></p></article>`;
+  })).join("");
+}
+document.addEventListener("click", e => { if (e.target.closest("[data-show-cash]")) txShow = "cash"; });
+
 function saleRefEditor(s) {
   if (!s.lines.some(l => l.acquired && l.acquired < "2026-01-01")) return "";
   const a = state.assets[s.asset] || {}, ccy = (a.currency || "EUR").toUpperCase();
@@ -514,23 +537,42 @@ function reportPdf(now = new Date()) {
 }
 
 // ================================================================ transacties
+let txShow = "all"; // tx | cash | all
 function renderTransactions() {
-  const all = state.transactions;
-  fillFilter("#f-year", [...new Set(all.map(t => t.trade_date.slice(0, 4)))].sort().reverse());
-  fillFilter("#f-owner", [...new Set(all.map(t => t.owner))].sort());
+  const all = state.transactions, cash = state.cash;
+  fillFilter("#f-year", [...new Set([...all.map(t => t.trade_date.slice(0, 4)), ...cash.map(c => c.date.slice(0, 4))])].sort().reverse());
+  fillFilter("#f-owner", [...new Set([...all.map(t => t.owner), ...cash.map(c => c.owner)])].sort());
   $("#asset-list").innerHTML = Object.keys(state.assets).map(a => `<option value="${esc(a)}">`).join("");
   $("#owner-list").innerHTML = [...new Set([DEFAULT_OWNER, ...all.map(t => t.owner)])].map(o => `<option value="${esc(o)}">`).join("");
-  const fy = $("#f-year").value, fo = $("#f-owner").value, fa = $("#f-asset").value.trim().toUpperCase(), fp = $("#f-proof").value;
+  const showTx = txShow !== "cash", showCash = txShow !== "tx";
+  const kinds = [...(showTx ? Object.keys(TYPE_LABELS).filter(k => all.some(t => t.type === k)).map(k => [k, TYPE_LABELS[k]]) : []),
+    ...(showCash ? Object.keys(GELD.KINDS).filter(k => cash.some(c => c.kind === k)).map(k => ["cash:" + k, GELD.label(k)]) : [])];
+  const fk = $("#f-kind"), curKind = fk.value;
+  fk.innerHTML = `<option value="">Alle</option>` + kinds.map(([k, l]) => `<option value="${esc(k)}">${esc(l)}</option>`).join("");
+  fk.value = kinds.some(([k]) => k === curKind) ? curKind : "";
+  const fy = $("#f-year").value, fo = $("#f-owner").value, fa = $("#f-asset").value.trim().toUpperCase(), fp = $("#f-proof").value, fkind = fk.value;
   const missing = new Set(window.BEWIJS.missingProof(all, heldKeys()).map(t => t.id));
-  $("#proof-missing").hidden = !missing.size || fp === "zonder";
+  $("#proof-missing").hidden = !missing.size || fp === "zonder" || !showTx;
   $("#proof-missing").textContent = `${missing.size === 1 ? "1 transactie" : `${missing.size} transacties`} van activa in bezit of belastbare verkopen ${missing.size === 1 ? "heeft" : "hebben"} nog geen bewijsstuk. Kies 'Bewijs ontbreekt' om ze te tonen.`;
   const hasProof = t => (t.attachments || []).length > 0;
-  const rows = all.filter(t => (!fy || t.trade_date.startsWith(fy)) && (!fo || t.owner === fo) && (!fa || t.asset.includes(fa))
-      && (!fp || (fp === "met" ? hasProof(t) : missing.has(t.id))))
-    .sort((a, b) => a.trade_date < b.trade_date ? 1 : a.trade_date > b.trade_date ? -1 : b.id - a.id);
+  const txRows = !showTx || fkind.startsWith("cash:") ? [] : all.filter(t => (!fy || t.trade_date.startsWith(fy)) && (!fo || t.owner === fo)
+      && (!fa || t.asset.includes(fa)) && (!fkind || t.type === fkind) && (!fp || (fp === "met" ? hasProof(t) : missing.has(t.id))));
+  // het bewijsfilter geldt enkel voor transacties
+  const cashRows = !showCash || fp || (fkind && !fkind.startsWith("cash:")) ? [] : cash.filter(c => (!fy || c.date.startsWith(fy)) && (!fo || c.owner === fo)
+      && (!fa || `${c.asset_name} ${c.description}`.toUpperCase().includes(fa)) && (!fkind || "cash:" + c.kind === fkind));
+  const rows = [...txRows.map(t => ({ date: t.trade_date, id: t.id, t })), ...cashRows.map(c => ({ date: c.date, id: c.id, c }))]
+    .sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : b.id - a.id);
+  const total = (showTx ? all.length : 0) + (showCash ? cash.length : 0);
   $("#tx-empty").hidden = rows.length > 0;
-  $("#tx-count").textContent = all.length ? `${rows.length} van ${all.length}` : "";
-  $("#tx-table tbody").innerHTML = rows.map(t => {
+  $("#tx-count").textContent = total ? `${rows.length} van ${total}` : "";
+  const counts = { tx: all.length, cash: cash.length, all: all.length + cash.length };
+  $$("#f-show button").forEach(b => { b.classList.toggle("on", b.dataset.show === txShow); $(".n", b).textContent = counts[b.dataset.show]; });
+  $("#f-show").closest("label").hidden = !cash.length;
+  $("#f-proof").closest("label").hidden = txShow === "cash";
+  renderCashSummary(showCash && cash.length ? { owner: fo, year: fy } : null);
+  $("#tx-table tbody").innerHTML = rows.map(({ t, c }) => t ? txRow(t, hasProof, missing) : cashRow(c)).join("");
+}
+function txRow(t, hasProof, missing) {
     const amt = t.type === "DIVIDEND" || t.type === "FEE";
     const value = t.type === "SPLIT" ? `${num(t.split_ratio)} : 1` : amt ? num(t.amount)
       : t.type === "DELISTING" ? (t.delist_mode === "UITKOOP" ? num(t.price) : "")
@@ -548,7 +590,31 @@ function renderTransactions() {
       <td>${esc(t.currency)}${t.currency !== "EUR" ? ` <span class="muted small" title="${esc(fxLabel(t))}">@${hasVal(t.eur_per_ccy) ? `${num(t.eur_per_ccy)} EUR` : num(t.fx_per_eur)}</span>` : ""}</td>
       <td>${esc(t.owner)}</td><td>${esc(t.broker)}</td>
       <td class="actions-cell"><button class="btn small danger" data-del="${t.id}" aria-label="Verwijder">✕</button></td></tr>`;
-  }).join("");
+}
+function cashRow(c) {
+  const v = c.amount == null || c.amount === "" ? null : D(c.amount);
+  const dir = c.status === "verwerkt" || !v ? "" : v.gt(0) ? "in" : v.lt(0) ? "out" : "";
+  const what = [c.asset_name, c.description && c.description !== c.asset_name ? c.description : ""].filter(Boolean).join(" – ");
+  const note = c.remark ? `<span class="cash-note ${c.status === "verwerkt" ? "done" : c.warn ? "warn" : ""}">${esc(c.remark)}</span>` : "";
+  return `<tr data-cash="${c.id}" class="clickable info" title="Geldbeweging (enkel ter info). Tik voor details.">
+    <td>${esc(c.date)}</td><td><span class="badge cash ${dir}">${esc(GELD.label(c.kind))}</span></td>
+    <td class="cash-what">${esc(what)}${note}${c.note ? `<span class="cash-note">${esc(c.note)}</span>` : ""}</td>
+    <td class="num"></td><td class="num ${v && v.lt(0) ? "neg" : ""}">${v ? num(v.toString()) : "–"}</td>
+    <td>${esc(c.currency || "EUR")}</td><td>${esc(c.owner)}</td><td>${esc(c.broker)}</td>
+    <td class="actions-cell"><button class="btn small danger" data-delcash="${c.id}" aria-label="Verwijder">✕</button></td></tr>`;
+}
+function renderCashSummary(filter) {
+  const box = $("#cash-summary");
+  const s = filter && GELD.summary(state.cash, state.transactions, state.withheld, filter);
+  box.hidden = !s || !s.rows.length;
+  if (box.hidden) return;
+  const cell = (v, cls = "") => `<td class="num ${cls}">${eur(v.toFixed(2))}</td>`;
+  const line = r => `<tr><td>${esc(r.year)}</td>${cell(r.deposits, "pos")}${cell(r.withdrawals, "neg")}<td class="num"><strong>${eur(r.net.toFixed(2))}</strong></td>
+    ${cell(r.dividends)}${cell(r.capital_reductions)}${cell(r.withheld)}</tr>`;
+  $("tbody", box).innerHTML = s.rows.map(line).join("");
+  $("tfoot", box).innerHTML = s.rows.length > 1 ? line(s.total) : "";
+  $("#cash-summary-hint").textContent = "Netto inbreng = gestort − opgenomen, volgens de geïmporteerde exports. Dividend = netto ontvangen dividenden min terugboekingen. " +
+    "Telt niet mee voor de belasting." + (s.foreign ? ` ${s.foreign} ${s.foreign === 1 ? "geldbeweging" : "geldbewegingen"} in een andere munt dan EUR ${s.foreign === 1 ? "is" : "zijn"} niet meegeteld.` : "");
 }
 function fillFilter(sel, values) {
   const el = $(sel), cur = el.value;
@@ -655,10 +721,46 @@ function deleteTx(id) {
 $("#tx-table").addEventListener("click", async e => {
   const del = e.target.closest("[data-del]");
   if (del) { e.stopPropagation(); if (await confirmDialog(deleteQuestion(Number(del.dataset.del)))) deleteTx(Number(del.dataset.del)); return; }
+  const delc = e.target.closest("[data-delcash]");
+  if (delc) { e.stopPropagation(); if (await confirmDialog("Deze geldbeweging verwijderen?")) deleteCash(Number(delc.dataset.delcash)); return; }
   const row = e.target.closest("tr[data-id]");
-  if (row) openTxDialog(state.transactions.find(t => t.id === Number(row.dataset.id)));
+  if (row) return openTxDialog(state.transactions.find(t => t.id === Number(row.dataset.id)));
+  const crow = e.target.closest("tr[data-cash]");
+  if (crow) openCashDialog(state.cash.find(c => c.id === Number(crow.dataset.cash)));
 });
-["#f-year", "#f-owner", "#f-proof"].forEach(s => $(s).addEventListener("change", renderTransactions));
+["#f-year", "#f-owner", "#f-proof", "#f-kind"].forEach(s => $(s).addEventListener("change", renderTransactions));
+$("#f-show").addEventListener("click", e => {
+  const b = e.target.closest("button[data-show]"); if (!b) return;
+  txShow = b.dataset.show; renderTransactions();
+});
+
+// ================================================================ geldbewegingen (enkel ter info)
+let editingCash = null;
+function openCashDialog(c) {
+  if (!c) return;
+  editingCash = c.id;
+  $("#cash-title").textContent = `${GELD.label(c.kind)} op ${c.date}`;
+  const v = c.amount == null || c.amount === "" ? "–" : `${num(c.amount)} ${c.currency || "EUR"}`;
+  const dd = (k, val) => val ? `<dt>${k}</dt><dd style="text-align:left;white-space:normal">${esc(val)}</dd>` : "";
+  $("#cash-details").innerHTML = dd("Bedrag", v) + dd("Effect", c.asset_name) + dd("Omschrijving", c.description)
+    + dd(c.status === "verwerkt" ? "Al verwerkt" : "Opmerking", c.remark) + dd("Eigenaar", c.owner) + dd("Broker", c.broker) + dd("Bron", c.import_source);
+  $("#cash-note").value = c.note || "";
+  $("#cash-dialog").showModal();
+}
+function deleteCash(id) {
+  state.cash = state.cash.filter(c => c.id !== id);
+  commit(); toast("Geldbeweging verwijderd. Een nieuwe import van dezelfde export voegt ze opnieuw toe.");
+}
+$("#cash-cancel").addEventListener("click", () => $("#cash-dialog").close());
+$("#cash-save").addEventListener("click", () => {
+  const c = state.cash.find(x => x.id === editingCash);
+  if (c) { const n = $("#cash-note").value.trim(); if (n) c.note = n; else delete c.note; commit(); }
+  $("#cash-dialog").close();
+});
+$("#cash-delete").addEventListener("click", async () => {
+  const id = editingCash; $("#cash-dialog").close();
+  if (await confirmDialog("Deze geldbeweging verwijderen?")) deleteCash(id);
+});
 $("#f-asset").addEventListener("input", renderTransactions);
 
 // ================================================================ bewijsstukken
@@ -1080,9 +1182,10 @@ async function importBackup(text) {
   const { state: s, files } = window.BEWIJS.splitBackup(parsed);
   if (!validState(s)) return toast("Dit bestand heeft niet de vorm van een back-up van deze tool.", true);
   const nf = Object.keys(files).length;
-  if (!(await confirmDialog(`Back-up met ${s.transactions.length} transacties${nf ? ` en ${nf} bewijsstukken` : ""} herstellen? Je huidige gegevens worden vervangen.`))) return;
+  const nc = s.cash.length;
+  if (!(await confirmDialog(`Back-up met ${s.transactions.length} transacties${nc ? `, ${nc} geldbewegingen` : ""}${nf ? ` en ${nf} bewijsstukken` : ""} herstellen? Je huidige gegevens worden vervangen.`))) return;
   const previous = window.BEWIJS.allAttachments(state.transactions);
-  state = s; state.nextId = Math.max(state.nextId || 1, ...state.transactions.map(t => t.id + 1));
+  state = s; state.nextId = Math.max(state.nextId || 1, ...state.transactions.map(t => t.id + 1), ...state.cash.map(c => (c.id || 0) + 1));
   migrateToNames();
   $("#import-text").value = ""; commit(); toast("Back-up hersteld");
   if (nf) await restoreProofFiles(files, previous);
@@ -1169,10 +1272,22 @@ function openImportDialog(r) {
   const fresh = r.transactions.filter((t, i) => !dupFlags[i]);
   const cnt = type => fresh.filter(t => t.type === type).length;
   const dup = r.transactions.length - fresh.length;
+  const freshCash = GELD.fresh(state.cash, r.cash), dupCash = (r.cash || []).length - freshCash.length;
   $("#imp-summary").innerHTML = `<strong>${esc(r.fileName)}</strong>: ${r.rows} regels gelezen.
-    Nieuw: ${cnt("BUY")} aankopen, ${cnt("SELL")} verkopen, ${cnt("DIVIDEND")} dividenden.
-    ${dup ? `<br>${dup} transacties waren al eerder geïmporteerd en worden overgeslagen.` : ""}`;
+    Nieuw: ${cnt("BUY")} aankopen, ${cnt("SELL")} verkopen, ${cnt("DIVIDEND")} dividenden${freshCash.length ? `, ${freshCash.length} ${freshCash.length === 1 ? "geldbeweging" : "geldbewegingen"}` : ""}.
+    ${dup ? `<br>${dup} transacties waren al eerder geïmporteerd en worden overgeslagen.` : ""}
+    ${dupCash ? `<br>${dupCash} ${dupCash === 1 ? "geldbeweging was" : "geldbewegingen waren"} al eerder geïmporteerd.` : ""}`;
+  const groups = GELD.groups(freshCash);
+  const list = gs => `<ul class="imp-list">${gs.map(g => `<li><span class="cnt">${g.count}</span><span class="grow">${esc(g.group)}${g.remark
+    ? `<span class="cash-note done">${esc(g.remark)}</span>` : ""}</span></li>`).join("")}</ul>`;
+  const news = groups.filter(g => g.status !== "verwerkt"), done = groups.filter(g => g.status === "verwerkt");
+  $("#imp-cash").innerHTML = (news.length ? `<div class="imp-sub">Nieuw in de tool</div>${list(news)}` : "")
+    + (done.length ? `<div class="imp-sub">Al verwerkt, nu ook zichtbaar als info</div>${list(done)}` : "");
+  $("#imp-cash-count").textContent = freshCash.length;
+  $("#imp-cash-wrap").hidden = !freshCash.length;
+  $("#imp-cash-add").checked = true;
   $("#imp-skipped").innerHTML = Object.entries(r.skipped).map(([k, v]) => `<li>${esc(k)}: ${v}</li>`).join("");
+  $("#imp-skipped-wrap").hidden = !Object.keys(r.skipped).length;
   $("#imp-owner").value = DEFAULT_OWNER;
   $("#imp-positions tbody").innerHTML = r.positions.map((p, i) => {
     const oldKey = [...(r.keyMoves || [])].find(([, to]) => to === p.asset)?.[0];
@@ -1262,6 +1377,8 @@ $("#imp-confirm").addEventListener("click", () => {
         split_ratio: null, import_id: id, note: `Delisting volgens ${r.source === "saxo" ? "Saxo" : "Bolero"}-export` });
       added++;
     }
+    let cashAdded = 0;
+    if ($("#imp-cash-add").checked) for (const c of GELD.fresh(state.cash, r.cash)) { state.cash.push({ ...c, owner, id: state.nextId++ }); cashAdded++; }
     for (const t of r.transactions) if (t.type === "DIVIDEND")
       state.assets[t.asset] ??= { name: "", asset_type: "aandeel", currency: t.currency, ref_value_eur: null, ref_source: "" };
     for (const { p, keep, ref } of decisions) {
@@ -1291,7 +1408,7 @@ $("#imp-confirm").addEventListener("click", () => {
     const missing = [...need.keys()].filter(a => needsRef(a) && !(state.assets[a]?.ref_value_eur));
     $("#import-dialog").close(); pendingImport = null;
     commit();
-    toast(`${added} transacties geïmporteerd` + (moved ? `; ${moved} ${moved === 1 ? "effect staat" : "effecten staan"} nu onder de naam` : "") + (missing.length ? `. Vul nog de waarde op 31/12/2025 in bij Activa voor: ${missing.map(a => state.assets[a]?.name || a).join(", ")}` : "")
+    toast(`${added} transacties` + (cashAdded ? ` en ${cashAdded} ${cashAdded === 1 ? "geldbeweging" : "geldbewegingen"}` : "") + " geïmporteerd" + (moved ? `; ${moved} ${moved === 1 ? "effect staat" : "effecten staan"} nu onder de naam` : "") + (missing.length ? `. Vul nog de waarde op 31/12/2025 in bij Activa voor: ${missing.map(a => state.assets[a]?.name || a).join(", ")}` : "")
       + (notMerged.length ? `. ${brokerName} hield meerwaardebelasting in (${notMerged.join(", ")}); je had voor dat jaar al zelf een bedrag ingevuld – pas het aan bij Instellingen als nodig` : ""),
       missing.length > 0 || notMerged.length > 0);
   } catch (err) { toast(err.message, true); }
