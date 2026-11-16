@@ -339,6 +339,17 @@ def ref_value_from_currency(price, fx_per_eur) -> Decimal:
     return (p / fx).quantize(REF_PLACES, rounding=ROUND_HALF_UP)
 
 
+def ref_value_from_eur_rate(price, eur_per_unit) -> Decimal:
+    """Idem, met de wisselkoers in de andere richting: 1 eenheid munt = eur_per_unit EUR;
+    afgerond op 10 decimalen."""
+    p, r = Decimal(price), Decimal(eur_per_unit)
+    if r <= 0:
+        raise ValueError("Wisselkoers op 31/12/2025 moet groter dan 0 zijn.")
+    if p < 0:
+        raise ValueError("Slotkoers op 31/12/2025 mag niet negatief zijn.")
+    return (p * r).quantize(REF_PLACES, rounding=ROUND_HALF_UP)
+
+
 def compare_methods(transactions, ref_values, cfg: Optional[EngineConfig] = None, **kw) -> dict[str, Report]:
     """Berekent beide interpretaties van de historische prijs naast elkaar."""
     cfg = cfg or EngineConfig()

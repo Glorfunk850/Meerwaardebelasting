@@ -80,6 +80,8 @@ td input, td select { width: 100%; min-width: 100px; font-size: 14px; }
 .ref-fx { display: grid; gap: .25rem; min-width: 150px; }
 .ref-fx label { display: grid; font-size: .78rem; text-align: left; }
 .ref-fx input[readonly] { opacity: .75; }
+.ref-fx-rate { display: grid; grid-template-columns: auto 1fr; gap: .25rem; }
+.ref-fx-rate select { min-width: 0; width: auto; font-size: .78rem; }
 td input.w-sm { min-width: 64px; } td input.w-xs { min-width: 48px; }
 td.actions-cell { text-align: right; }
 tr.clickable { cursor: pointer; } tr.clickable:hover td { background: #f3f7fb; }
@@ -210,7 +212,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
         Toon ook activa die niet meer in portefeuille zitten, ook die je uit de lijst verwijderde (<span id="asset-closed-count">0</span>)</label></div>
     <p class="muted">Voor elk actief dat je vóór 1 januari 2026 verwierf, is de waarde per stuk op 31/12/2025 nodig
       (slotkoers). Voor effecten in een andere munt vul je de slotkoers in die munt in en de wisselkoers op 31/12/2025
-      (1 EUR = … munt), bv. de koers die je broker gebruikt; de tool rekent om naar EUR. De koers vul je per effect zelf in. Activa worden automatisch toegevoegd bij een transactie.</p>
+      (1 EUR = … munt of 1 munt = … EUR, kies de richting), bv. de koers die je broker gebruikt; de tool rekent om naar EUR. De koers vul je per effect zelf in. Activa worden automatisch toegevoegd bij een transactie.</p>
     <div id="asset-missing" class="alert warn" hidden></div>
     <div class="table-wrap"><table id="asset-table"><thead><tr><th>Naam</th><th>ISIN</th><th>Type</th><th>Munt</th>
       <th class="num">Waarde 31/12/2025 per stuk</th><th>Bron</th><th></th></tr></thead><tbody></tbody></table></div>
@@ -323,7 +325,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     Vink uit wat je op 31/12/2025 niet meer had; de tool boekt het dan uit vóór 2026 (geen belastbaar moment).
     Vul de slotkoers op 31/12/2025 per stuk in als je die kent; ze is pas nodig wanneer je het effect verkoopt.
     Voor effecten in een andere munt vul je de slotkoers in die munt in, plus de wisselkoers van 31/12/2025
-    (1 EUR = … munt); de tool rekent om naar EUR. Vul de koers per effect zelf in: ze kan per broker verschillen.</p>
+    (1 EUR = … munt of 1 munt = … EUR, kies de richting); de tool rekent om naar EUR. Vul de koers per effect zelf in: ze kan per broker verschillen.</p>
   <div class="table-wrap"><table id="imp-positions"><thead><tr><th>Bezit</th><th>Effect</th><th class="num">Aantal</th>
     <th class="col-div">Laatste dividend</th><th class="num">Waarde 31/12/2025</th></tr></thead><tbody></tbody></table></div>
   <div id="imp-delist-wrap" hidden>
@@ -704,13 +706,21 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     return p.div(fx).round(10);
   }
 
+  /** Idem, met de wisselkoers in de andere richting: 1 eenheid munt = eurPerUnit EUR; afgerond op 10 decimalen. */
+  function refValueFromEurRate(price, eurPerUnit) {
+    const p = D(price), r = D(eurPerUnit);
+    if (!r.gt(ZERO)) throw new Error("Wisselkoers op 31/12/2025 moet groter dan 0 zijn.");
+    if (p.lt(ZERO)) throw new Error("Slotkoers op 31/12/2025 mag niet negatief zijn.");
+    return p.mul(r).round(10);
+  }
+
   function compareMethods(transactions, refValues, cfg, withheld, throughYear) {
     const res = {};
     for (const m of ["FIFO", "GEMIDDELD"]) res[m] = calculate(transactions, refValues, { ...cfg, historicMethod: m }, withheld, throughYear);
     return res;
   }
 
-  const api = { Dec, D, ZERO, ONE, money, TxType, DelistModes, ACQ, defaultConfig, calculate, compareMethods, holdingsAt, refValueFromCurrency };
+  const api = { Dec, D, ZERO, ONE, money, TxType, DelistModes, ACQ, defaultConfig, calculate, compareMethods, holdingsAt, refValueFromCurrency, refValueFromEurRate };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.MWB = api;
 })(typeof window !== "undefined" ? window : globalThis);
 </script>
@@ -2313,13 +2323,19 @@ dlg.addEventListener("close", () => {
 // ================================================================ waarde 31/12/2025
 // In EUR, of voor effecten in vreemde munt: slotkoers in die munt + wisselkoers op 31/12/2025.
 // De wisselkoers wordt altijd per effect zelf ingevuld (kan per broker verschillen), nooit overgenomen.
+// De koers kan in beide richtingen: 1 EUR = … munt (ref_fx_per_eur) of 1 munt = … EUR (ref_eur_per_ccy).
 const hasVal = v => v != null && String(v).trim() !== "";
+const refFields = a => ({ ref_value_eur: a.ref_value_eur, ref_price: a.ref_price, ref_fx_per_eur: a.ref_fx_per_eur, ref_eur_per_ccy: a.ref_eur_per_ccy });
 function refInputs(ccy, a, placeholder) {
   const eur = `<input name="ref_value_eur" inputmode="decimal" class="num" value="${esc(a.ref_value_eur ?? "")}" placeholder="${esc(placeholder)}" aria-label="Waarde 31/12/2025 in EUR"`;
   if (!ccy || ccy === "EUR") return eur + ">";
+  const inv = hasVal(a.ref_eur_per_ccy) && !hasVal(a.ref_fx_per_eur);
   return `<div class="ref-fx" data-ccy="${esc(ccy)}">
     <label>Slotkoers in ${esc(ccy)} <input name="ref_price" inputmode="decimal" class="num" value="${esc(a.ref_price ?? "")}" placeholder="${esc(placeholder)}"></label>
-    <label>Wisselkoers: 1 EUR = … ${esc(ccy)} <input name="ref_fx_per_eur" inputmode="decimal" class="num" value="${esc(a.ref_fx_per_eur ?? "")}" placeholder="koers 31/12/2025"></label>
+    <span class="ref-fx-rate"><select name="ref_fx_dir" aria-label="Richting wisselkoers">
+        <option value="PER_EUR"${inv ? "" : " selected"}>1 EUR = … ${esc(ccy)}</option>
+        <option value="EUR_PER"${inv ? " selected" : ""}>1 ${esc(ccy)} = … EUR</option></select>
+      <input name="ref_fx" inputmode="decimal" class="num" value="${esc((inv ? a.ref_eur_per_ccy : a.ref_fx_per_eur) ?? "")}" placeholder="koers 31/12/2025" aria-label="Wisselkoers 31/12/2025"></span>
     <label>In EUR ${eur}${hasVal(a.ref_price) ? " readonly" : ""}></label></div>`;
 }
 /** Bereken de EUR-waarde live zodra slotkoers en wisselkoers ingevuld zijn. */
@@ -2328,15 +2344,20 @@ function syncRef(row) {
   const eurEl = $("[name=ref_value_eur]", row), filled = hasVal(p.value);
   eurEl.readOnly = filled;
   if (!filled) return;
-  try { eurEl.value = window.MWB.refValueFromCurrency(p.value, $("[name=ref_fx_per_eur]", row).value).toString(); } catch { eurEl.value = ""; }
+  try { eurEl.value = refFromFx(p.value, $("[name=ref_fx_dir]", row).value, $("[name=ref_fx]", row).value).toString(); } catch { eurEl.value = ""; }
+}
+function refFromFx(price, dir, rate) {
+  return dir === "EUR_PER" ? window.MWB.refValueFromEurRate(price, rate) : window.MWB.refValueFromCurrency(price, rate);
 }
 function readRef(row, label) {
   const p = $("[name=ref_price]", row);
   const price = p ? dec(p.value, `slotkoers 31/12/2025 voor ${label}`, { nonNegative: true }) : null;
   if (price == null)
-    return { ref_value_eur: dec($("[name=ref_value_eur]", row).value, `waarde 31/12/2025 voor ${label}`, { nonNegative: true }), ref_price: null, ref_fx_per_eur: null };
-  const fx = dec($("[name=ref_fx_per_eur]", row).value, `wisselkoers 31/12/2025 voor ${label}`, { required: true, positive: true });
-  return { ref_value_eur: window.MWB.refValueFromCurrency(price, fx).toString(), ref_price: price, ref_fx_per_eur: fx };
+    return { ref_value_eur: dec($("[name=ref_value_eur]", row).value, `waarde 31/12/2025 voor ${label}`, { nonNegative: true }), ref_price: null, ref_fx_per_eur: null, ref_eur_per_ccy: null };
+  const dir = $("[name=ref_fx_dir]", row).value;
+  const fx = dec($("[name=ref_fx]", row).value, `wisselkoers 31/12/2025 voor ${label}`, { required: true, positive: true });
+  return { ref_value_eur: refFromFx(price, dir, fx).toString(), ref_price: price,
+    ref_fx_per_eur: dir === "EUR_PER" ? null : fx, ref_eur_per_ccy: dir === "EUR_PER" ? fx : null };
 }
 
 // ================================================================ activa
@@ -2405,7 +2426,7 @@ $("#asset-table").addEventListener("click", async e => {
   const v = {}; $$("input, select", row).forEach(el => { v[el.name] = el.value.trim(); });
   try {
     const ccy = (v.currency || "EUR").toUpperCase();
-    const ref = ccy === "EUR" ? { ref_value_eur: dec(v.ref_value_eur, "waarde 31/12/2025", { nonNegative: true }), ref_price: null, ref_fx_per_eur: null }
+    const ref = ccy === "EUR" ? { ref_value_eur: dec(v.ref_value_eur, "waarde 31/12/2025", { nonNegative: true }), ref_price: null, ref_fx_per_eur: null, ref_eur_per_ccy: null }
       : readRef(row, isin);
     const code = v.isin.replace(/\s/g, "").toUpperCase();
     if (code && !isIsinCode(code)) throw new InputError("Een ISIN heeft 12 tekens: 2 letters, 9 letters of cijfers en een cijfer (bv. BE0003565737).");
@@ -2639,7 +2660,7 @@ function openImportDialog(r) {
     const known = [state.assets[p.asset], oldKey && state.assets[oldKey]].find(a => a && hasVal(a.ref_value_eur));
     const cur = known?.ref_value_eur;
     const ccy = String(r.assets?.[p.asset]?.currency || state.assets[p.asset]?.currency || "EUR").toUpperCase();
-    const val = known ? { ref_value_eur: cur, ref_price: known.ref_price, ref_fx_per_eur: known.ref_fx_per_eur } : { ref_value_eur: p.refHint?.value ?? "" };
+    const val = known ? refFields(known) : { ref_value_eur: p.refHint?.value ?? "" };
     return `<tr data-i="${i}" class="${p.suspicious ? "suspicious" : ""}">
       <td><input type="checkbox" name="keep" ${p.suspicious ? "" : "checked"} aria-label="Nog in bezit"></td>
       <td><strong>${esc(p.asset)}</strong>${p.name ? `<br><span class="small muted">${esc(p.name)}</span>` : ""}${p.suspicious ? `<br><span class="small neg">waarschijnlijk niet meer in bezit (overname, splitsing of naamswijziging?)</span>` : ""}</td>

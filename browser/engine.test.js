@@ -227,3 +227,10 @@ test("waarde 31/12/2025 uit slotkoers in vreemde munt", () => {
   assert.throws(() => M.refValueFromCurrency("150", "0"));
   assert.throws(() => M.refValueFromCurrency("-1", "1.2"));
 });
+
+test("waarde 31/12/2025 met wisselkoers munt -> EUR", () => {
+  assert.equal(M.refValueFromEurRate("150", "0.8514").toString(), "127.71");
+  assert.equal(M.refValueFromEurRate("33.333", "0.12345678901").toString(), "4.1151851481");
+  assert.throws(() => M.refValueFromEurRate("150", "0"));
+  assert.throws(() => M.refValueFromEurRate("-1", "0.85"));
+});

@@ -340,12 +340,20 @@
     return p.div(fx).round(10);
   }
 
+  /** Idem, met de wisselkoers in de andere richting: 1 eenheid munt = eurPerUnit EUR; afgerond op 10 decimalen. */
+  function refValueFromEurRate(price, eurPerUnit) {
+    const p = D(price), r = D(eurPerUnit);
+    if (!r.gt(ZERO)) throw new Error("Wisselkoers op 31/12/2025 moet groter dan 0 zijn.");
+    if (p.lt(ZERO)) throw new Error("Slotkoers op 31/12/2025 mag niet negatief zijn.");
+    return p.mul(r).round(10);
+  }
+
   function compareMethods(transactions, refValues, cfg, withheld, throughYear) {
     const res = {};
     for (const m of ["FIFO", "GEMIDDELD"]) res[m] = calculate(transactions, refValues, { ...cfg, historicMethod: m }, withheld, throughYear);
     return res;
   }
 
-  const api = { Dec, D, ZERO, ONE, money, TxType, DelistModes, ACQ, defaultConfig, calculate, compareMethods, holdingsAt, refValueFromCurrency };
+  const api = { Dec, D, ZERO, ONE, money, TxType, DelistModes, ACQ, defaultConfig, calculate, compareMethods, holdingsAt, refValueFromCurrency, refValueFromEurRate };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.MWB = api;
 })(typeof window !== "undefined" ? window : globalThis);

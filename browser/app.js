@@ -699,13 +699,19 @@ dlg.addEventListener("close", () => {
 // ================================================================ waarde 31/12/2025
 // In EUR, of voor effecten in vreemde munt: slotkoers in die munt + wisselkoers op 31/12/2025.
 // De wisselkoers wordt altijd per effect zelf ingevuld (kan per broker verschillen), nooit overgenomen.
+// De koers kan in beide richtingen: 1 EUR = … munt (ref_fx_per_eur) of 1 munt = … EUR (ref_eur_per_ccy).
 const hasVal = v => v != null && String(v).trim() !== "";
+const refFields = a => ({ ref_value_eur: a.ref_value_eur, ref_price: a.ref_price, ref_fx_per_eur: a.ref_fx_per_eur, ref_eur_per_ccy: a.ref_eur_per_ccy });
 function refInputs(ccy, a, placeholder) {
   const eur = `<input name="ref_value_eur" inputmode="decimal" class="num" value="${esc(a.ref_value_eur ?? "")}" placeholder="${esc(placeholder)}" aria-label="Waarde 31/12/2025 in EUR"`;
   if (!ccy || ccy === "EUR") return eur + ">";
+  const inv = hasVal(a.ref_eur_per_ccy) && !hasVal(a.ref_fx_per_eur);
   return `<div class="ref-fx" data-ccy="${esc(ccy)}">
     <label>Slotkoers in ${esc(ccy)} <input name="ref_price" inputmode="decimal" class="num" value="${esc(a.ref_price ?? "")}" placeholder="${esc(placeholder)}"></label>
-    <label>Wisselkoers: 1 EUR = … ${esc(ccy)} <input name="ref_fx_per_eur" inputmode="decimal" class="num" value="${esc(a.ref_fx_per_eur ?? "")}" placeholder="koers 31/12/2025"></label>
+    <span class="ref-fx-rate"><select name="ref_fx_dir" aria-label="Richting wisselkoers">
+        <option value="PER_EUR"${inv ? "" : " selected"}>1 EUR = … ${esc(ccy)}</option>
+        <option value="EUR_PER"${inv ? " selected" : ""}>1 ${esc(ccy)} = … EUR</option></select>
+      <input name="ref_fx" inputmode="decimal" class="num" value="${esc((inv ? a.ref_eur_per_ccy : a.ref_fx_per_eur) ?? "")}" placeholder="koers 31/12/2025" aria-label="Wisselkoers 31/12/2025"></span>
     <label>In EUR ${eur}${hasVal(a.ref_price) ? " readonly" : ""}></label></div>`;
 }
 /** Bereken de EUR-waarde live zodra slotkoers en wisselkoers ingevuld zijn. */
@@ -714,15 +720,20 @@ function syncRef(row) {
   const eurEl = $("[name=ref_value_eur]", row), filled = hasVal(p.value);
   eurEl.readOnly = filled;
   if (!filled) return;
-  try { eurEl.value = window.MWB.refValueFromCurrency(p.value, $("[name=ref_fx_per_eur]", row).value).toString(); } catch { eurEl.value = ""; }
+  try { eurEl.value = refFromFx(p.value, $("[name=ref_fx_dir]", row).value, $("[name=ref_fx]", row).value).toString(); } catch { eurEl.value = ""; }
+}
+function refFromFx(price, dir, rate) {
+  return dir === "EUR_PER" ? window.MWB.refValueFromEurRate(price, rate) : window.MWB.refValueFromCurrency(price, rate);
 }
 function readRef(row, label) {
   const p = $("[name=ref_price]", row);
   const price = p ? dec(p.value, `slotkoers 31/12/2025 voor ${label}`, { nonNegative: true }) : null;
   if (price == null)
-    return { ref_value_eur: dec($("[name=ref_value_eur]", row).value, `waarde 31/12/2025 voor ${label}`, { nonNegative: true }), ref_price: null, ref_fx_per_eur: null };
-  const fx = dec($("[name=ref_fx_per_eur]", row).value, `wisselkoers 31/12/2025 voor ${label}`, { required: true, positive: true });
-  return { ref_value_eur: window.MWB.refValueFromCurrency(price, fx).toString(), ref_price: price, ref_fx_per_eur: fx };
+    return { ref_value_eur: dec($("[name=ref_value_eur]", row).value, `waarde 31/12/2025 voor ${label}`, { nonNegative: true }), ref_price: null, ref_fx_per_eur: null, ref_eur_per_ccy: null };
+  const dir = $("[name=ref_fx_dir]", row).value;
+  const fx = dec($("[name=ref_fx]", row).value, `wisselkoers 31/12/2025 voor ${label}`, { required: true, positive: true });
+  return { ref_value_eur: refFromFx(price, dir, fx).toString(), ref_price: price,
+    ref_fx_per_eur: dir === "EUR_PER" ? null : fx, ref_eur_per_ccy: dir === "EUR_PER" ? fx : null };
 }
 
 // ================================================================ activa
@@ -791,7 +802,7 @@ $("#asset-table").addEventListener("click", async e => {
   const v = {}; $$("input, select", row).forEach(el => { v[el.name] = el.value.trim(); });
   try {
     const ccy = (v.currency || "EUR").toUpperCase();
-    const ref = ccy === "EUR" ? { ref_value_eur: dec(v.ref_value_eur, "waarde 31/12/2025", { nonNegative: true }), ref_price: null, ref_fx_per_eur: null }
+    const ref = ccy === "EUR" ? { ref_value_eur: dec(v.ref_value_eur, "waarde 31/12/2025", { nonNegative: true }), ref_price: null, ref_fx_per_eur: null, ref_eur_per_ccy: null }
       : readRef(row, isin);
     const code = v.isin.replace(/\s/g, "").toUpperCase();
     if (code && !isIsinCode(code)) throw new InputError("Een ISIN heeft 12 tekens: 2 letters, 9 letters of cijfers en een cijfer (bv. BE0003565737).");
@@ -1025,7 +1036,7 @@ function openImportDialog(r) {
     const known = [state.assets[p.asset], oldKey && state.assets[oldKey]].find(a => a && hasVal(a.ref_value_eur));
     const cur = known?.ref_value_eur;
     const ccy = String(r.assets?.[p.asset]?.currency || state.assets[p.asset]?.currency || "EUR").toUpperCase();
-    const val = known ? { ref_value_eur: cur, ref_price: known.ref_price, ref_fx_per_eur: known.ref_fx_per_eur } : { ref_value_eur: p.refHint?.value ?? "" };
+    const val = known ? refFields(known) : { ref_value_eur: p.refHint?.value ?? "" };
     return `<tr data-i="${i}" class="${p.suspicious ? "suspicious" : ""}">
       <td><input type="checkbox" name="keep" ${p.suspicious ? "" : "checked"} aria-label="Nog in bezit"></td>
       <td><strong>${esc(p.asset)}</strong>${p.name ? `<br><span class="small muted">${esc(p.name)}</span>` : ""}${p.suspicious ? `<br><span class="small neg">waarschijnlijk niet meer in bezit (overname, splitsing of naamswijziging?)</span>` : ""}</td>

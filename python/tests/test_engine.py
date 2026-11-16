@@ -16,6 +16,7 @@ from engine import (
     calculate,
     compare_methods,
     ref_value_from_currency,
+    ref_value_from_eur_rate,
 )
 
 
@@ -359,3 +360,13 @@ def test_ref_value_from_foreign_currency():
         ref_value_from_currency("150", "0")
     with pytest.raises(ValueError):
         ref_value_from_currency("-1", "1.2")
+
+
+def test_ref_value_from_eur_rate():
+    # slotkoers 150 USD, koers 31/12/2025 1 USD = 0,8514 EUR (verzonnen)
+    assert ref_value_from_eur_rate("150", "0.8514") == D("127.71")
+    assert ref_value_from_eur_rate("33.333", "0.12345678901") == D("4.1151851481")
+    with pytest.raises(ValueError):
+        ref_value_from_eur_rate("150", "0")
+    with pytest.raises(ValueError):
+        ref_value_from_eur_rate("-1", "0.85")
