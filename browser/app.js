@@ -481,7 +481,7 @@ function reportPdf(now = new Date()) {
     const chk = boleroCheckInfo(s);
     if (chk) blocks.push({ type: "note", tone: chk.same ? "ok" : "warn", text: chk.text });
     blocks.push({ type: "table", cols: [
-      { title: "Lot (aankoop)", width: 0.11 }, { title: "Aantal", width: 0.08, align: "right" },
+      { title: "Aankoop lot", width: 0.11 }, { title: "Aantal", width: 0.08, align: "right" },
       { title: "Opbrengst", width: 0.13, align: "right" }, { title: "Basis", width: 0.12, align: "right" },
       { title: "Basis volgens", width: 0.16 }, { title: "Resultaat", width: 0.12, align: "right" }, { title: "Opmerking", width: 0.28 }],
       rows: s.lines.map(l => [l.acquired || "–", num(l.quantity.toString()), m2(l.proceeds_eur), m2(l.basis_eur),
