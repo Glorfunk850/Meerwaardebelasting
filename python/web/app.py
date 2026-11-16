@@ -24,6 +24,8 @@ from engine import (
     Transaction,
     TxType,
     calculate,
+    ref_value_from_currency,
+    ref_value_from_eur_rate,
 )
 from engine.models import ACQUISITION_TYPES
 
@@ -63,6 +65,31 @@ def s(d: Decimal | None) -> str | None:
     return None if d is None else str(d)
 
 
+def plain(d: Decimal) -> str:
+    """Zonder overbodige nullen achter de komma, zoals de browserversie (127.7100000000 -> 127.71)."""
+    t = f"{d:f}"
+    return t.rstrip("0").rstrip(".") if "." in t else t
+
+
+def has_val(v) -> bool:
+    return v is not None and str(v).strip() != ""
+
+
+def fx_fields(p: dict, prefix: str = "") -> tuple[str, Decimal | None]:
+    """Richting en koers uit `<prefix>fx_dir` + `<prefix>fx` (formulier) of uit
+    `<prefix>fx_per_eur` / `<prefix>eur_per_ccy`. -> ("PER_EUR" | "EUR_PER", koers of None)"""
+    direction = p.get(prefix + "fx_dir")
+    if direction:
+        if direction not in ("PER_EUR", "EUR_PER"):
+            raise ApiError(f"Onbekende richting van de wisselkoers: {direction!r}")
+        raw = p.get(prefix + "fx")
+    elif has_val(p.get(prefix + "eur_per_ccy")):
+        direction, raw = "EUR_PER", p.get(prefix + "eur_per_ccy")
+    else:
+        direction, raw = "PER_EUR", p.get(prefix + "fx_per_eur")
+    return direction, dec(raw, "wisselkoers", positive=True)
+
+
 def validate_tx(p: dict) -> dict:
     try:
         tx_type = TxType(p.get("type", ""))
@@ -83,7 +110,7 @@ def validate_tx(p: dict) -> dict:
         "type": tx_type.value,
         "asset": asset,
         "currency": str(p.get("currency") or "EUR").strip().upper(),
-        "fx_per_eur": s(dec(p.get("fx_per_eur") or "1", "wisselkoers", positive=True)),
+        "fx_per_eur": "1", "eur_per_ccy": None,
         "fees": s(dec(p.get("fees") or "0", "kosten", non_negative=True)),
         "taxes": s(dec(p.get("taxes") or "0", "taksen", non_negative=True)),
         "historic_proven": 1 if p.get("historic_proven") else 0,
@@ -92,7 +119,13 @@ def validate_tx(p: dict) -> dict:
         "note": str(p.get("note") or "").strip(),
         "quantity": "0", "price": "0", "amount": "0", "split_ratio": None,
     }
-    if out["currency"] == "EUR" and Decimal(out["fx_per_eur"]) != 1:
+    direction, fx = fx_fields(p)
+    fx = fx if fx is not None else Decimal(1)
+    if direction == "EUR_PER":
+        out["eur_per_ccy"] = s(fx)
+    else:
+        out["fx_per_eur"] = s(fx)
+    if out["currency"] == "EUR" and fx != 1:
         raise ApiError("Voor EUR moet de wisselkoers 1 zijn.")
 
     if tx_type in ACQUISITION_TYPES or tx_type == TxType.SELL:
@@ -242,15 +275,32 @@ def create_app(db_path: str | Path | None = None) -> Flask:
         atype = p.get("asset_type") or "aandeel"
         if atype not in ASSET_TYPES:
             raise ApiError(f"Onbekend type actief: {atype}")
-        ref = dec(p.get("ref_value_eur"), "waarde 31/12/2025", non_negative=True)
+        currency = str(p.get("currency") or "EUR").strip().upper()
+        # waarde 31/12/2025: in EUR, of slotkoers in vreemde munt + wisselkoers (in een van beide richtingen)
+        price = dec(p.get("ref_price"), "slotkoers 31/12/2025", non_negative=True) if currency != "EUR" else None
+        fx_per_eur = eur_per_ccy = None
+        if price is not None:
+            direction, fx = fx_fields(p, "ref_")
+            if fx is None:
+                raise ApiError("Vul de wisselkoers op 31/12/2025 in.")
+            if direction == "EUR_PER":
+                eur_per_ccy, ref = fx, ref_value_from_eur_rate(price, fx)
+            else:
+                fx_per_eur, ref = fx, ref_value_from_currency(price, fx)
+        else:
+            ref = dec(p.get("ref_value_eur"), "waarde 31/12/2025", non_negative=True)
         conn().execute(
-            """INSERT INTO assets (isin, name, asset_type, currency, listed, ref_value_eur, ref_source)
-               VALUES (?,?,?,?,?,?,?)
+            """INSERT INTO assets (isin, name, asset_type, currency, listed, ref_value_eur, ref_source,
+                                  ref_price, ref_fx_per_eur, ref_eur_per_ccy)
+               VALUES (?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(isin) DO UPDATE SET name=excluded.name, asset_type=excluded.asset_type,
                  currency=excluded.currency, listed=excluded.listed,
-                 ref_value_eur=excluded.ref_value_eur, ref_source=excluded.ref_source""",
-            (isin, str(p.get("name") or ""), atype, str(p.get("currency") or "EUR").upper(),
-             1 if p.get("listed", True) else 0, s(ref), str(p.get("ref_source") or "")),
+                 ref_value_eur=excluded.ref_value_eur, ref_source=excluded.ref_source,
+                 ref_price=excluded.ref_price, ref_fx_per_eur=excluded.ref_fx_per_eur,
+                 ref_eur_per_ccy=excluded.ref_eur_per_ccy""",
+            (isin, str(p.get("name") or ""), atype, currency,
+             1 if p.get("listed", True) else 0, None if ref is None else plain(ref), str(p.get("ref_source") or ""),
+             s(price), s(fx_per_eur), s(eur_per_ccy)),
         )
         conn().commit()
         return jsonify(ok=True)
@@ -362,7 +412,8 @@ def create_app(db_path: str | Path | None = None) -> Flask:
             Transaction(
                 trade_date=date.fromisoformat(r["trade_date"]), type=TxType(r["type"]), asset=r["asset"],
                 quantity=Decimal(r["quantity"]), price=Decimal(r["price"]), currency=r["currency"],
-                fx_per_eur=Decimal(r["fx_per_eur"]), fees=Decimal(r["fees"]), taxes=Decimal(r["taxes"]),
+                fx_per_eur=Decimal(r["fx_per_eur"]),
+                eur_per_ccy=Decimal(r["eur_per_ccy"]) if r["eur_per_ccy"] else None, fees=Decimal(r["fees"]), taxes=Decimal(r["taxes"]),
                 owner=r["owner"], broker=r["broker"],
                 split_ratio=Decimal(r["split_ratio"]) if r["split_ratio"] else None,
                 historic_proven=bool(r["historic_proven"]), cost_known=bool(r["cost_known"]),

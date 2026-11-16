@@ -163,6 +163,15 @@ function dec(value, field, { required = false, positive = false, nonNegative = f
   if (nonNegative && d.lt(0)) throw new InputError(`Veld '${field}' mag niet negatief zijn.`);
   return d.toString();
 }
+/** Wisselkoers uit het formulier (fx_dir + fx) of uit bestaande gegevens (fx_per_eur / eur_per_ccy).
+ *  Wordt bewaard zoals ingegeven: 1 EUR = … munt in fx_per_eur, of 1 munt = … EUR in eur_per_ccy. */
+function txFx(p) {
+  const dir = p.fx_dir || (hasVal(p.eur_per_ccy) ? "EUR_PER" : "PER_EUR");
+  const raw = p.fx_dir ? p.fx : (dir === "EUR_PER" ? p.eur_per_ccy : p.fx_per_eur);
+  const fx = dec(hasVal(raw) ? raw : "1", "wisselkoers", { positive: true });
+  return dir === "EUR_PER" ? { fx_per_eur: "1", eur_per_ccy: fx } : { fx_per_eur: fx, eur_per_ccy: null };
+}
+const fxLabel = t => hasVal(t.eur_per_ccy) ? `1 ${t.currency} = ${num(t.eur_per_ccy)} EUR` : `1 EUR = ${num(t.fx_per_eur)} ${t.currency}`;
 function validateTx(p) {
   if (!TYPE_LABELS[p.type]) throw new InputError(`Onbekend transactietype: ${p.type}`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(p.trade_date || "") || isNaN(Date.parse(p.trade_date))) throw new InputError("Datum moet het formaat JJJJ-MM-DD hebben.");
@@ -171,13 +180,14 @@ function validateTx(p) {
   const out = {
     owner: String(p.owner || DEFAULT_OWNER).trim(), broker: String(p.broker || "").trim(), trade_date: p.trade_date,
     type: p.type, asset, currency: String(p.currency || "EUR").trim().toUpperCase(),
-    fx_per_eur: dec(p.fx_per_eur || "1", "wisselkoers", { positive: true }),
+    ...txFx(p),
     fees: dec(p.fees || "0", "kosten", { nonNegative: true }), taxes: dec(p.taxes || "0", "taksen", { nonNegative: true }),
     historic_proven: !!p.historic_proven, cost_known: p.cost_known !== false,
     reynders_eur: dec(p.reynders_eur || "0", "Reynders-bedrag", { nonNegative: true }),
     note: String(p.note || "").trim(), quantity: "0", price: "0", amount: "0", split_ratio: null,
   };
-  if (out.currency === "EUR" && !D(out.fx_per_eur).eq(1)) throw new InputError("Voor EUR moet de wisselkoers 1 zijn.");
+  if (out.currency === "EUR" && !(D(out.fx_per_eur).eq(1) && (out.eur_per_ccy == null || D(out.eur_per_ccy).eq(1))))
+    throw new InputError("Voor EUR moet de wisselkoers 1 zijn.");
   if (ACQ.includes(p.type) || p.type === "SELL") {
     out.quantity = dec(p.quantity, "aantal", { required: true, positive: true });
     const price = dec(p.price, "prijs", { required: p.type === "SELL" || out.cost_known, nonNegative: true });
@@ -417,7 +427,7 @@ function renderTransactions() {
       <td>${esc(t.asset)}</td>
       <td class="num">${["SPLIT", "DIVIDEND", "FEE"].includes(t.type) || (t.type === "DELISTING" && D(t.quantity || 0).isZero()) ? "" : num(t.quantity)}</td>
       <td class="num">${value}</td>
-      <td>${esc(t.currency)}${t.currency !== "EUR" ? ` <span class="muted small">@${num(t.fx_per_eur)}</span>` : ""}</td>
+      <td>${esc(t.currency)}${t.currency !== "EUR" ? ` <span class="muted small" title="${esc(fxLabel(t))}">@${hasVal(t.eur_per_ccy) ? `${num(t.eur_per_ccy)} EUR` : num(t.fx_per_eur)}</span>` : ""}</td>
       <td>${esc(t.owner)}</td><td>${esc(t.broker)}</td>
       <td class="actions-cell"><button class="btn small danger" data-del="${t.id}" aria-label="Verwijder">✕</button></td></tr>`;
   }).join("");
@@ -454,7 +464,13 @@ function updateFieldVisibility() {
   form.elements.price.disabled = acq && t !== "BUY" && !form.elements.cost_known.checked;
 }
 ["type", "trade_date", "cost_known", "delist_mode"].forEach(n => form.elements[n].addEventListener("change", updateFieldVisibility));
-form.elements.currency.addEventListener("input", () => { if (form.elements.currency.value.trim().toUpperCase() === "EUR") form.elements.fx_per_eur.value = "1"; });
+form.elements.currency.addEventListener("input", () => { if (form.elements.currency.value.trim().toUpperCase() === "EUR") form.elements.fx.value = "1"; updateFxLabels(); });
+/** Toon de munt in de keuze van de koersrichting (1 EUR = … USD / 1 USD = … EUR). */
+function updateFxLabels() {
+  const c = form.elements.currency.value.trim().toUpperCase() || "munt";
+  const [perEur, eurPer] = form.elements.fx_dir.options;
+  perEur.textContent = `1 EUR = … ${c}`; eurPer.textContent = `1 ${c} = … EUR`;
+}
 
 function openTxDialog(tx) {
   form.reset();
@@ -468,6 +484,10 @@ function openTxDialog(tx) {
     if (el && el.name) { if (el.type === "checkbox") el.checked = !!v; else el.value = v ?? ""; }
   } else form.elements.trade_date.value = new Date().toISOString().slice(0, 10);
   if (tx && tx.type === "DELISTING" && D(tx.quantity || 0).isZero()) form.elements.quantity.value = "";
+  const inv = !!tx && hasVal(tx.eur_per_ccy);
+  form.elements.fx_dir.value = inv ? "EUR_PER" : "PER_EUR";
+  form.elements.fx.value = tx ? (inv ? tx.eur_per_ccy : tx.fx_per_eur ?? "1") : "1";
+  updateFxLabels();
   updateFieldVisibility();
   openProofs(tx);
   dlg.showModal();
@@ -699,13 +719,19 @@ dlg.addEventListener("close", () => {
 // ================================================================ waarde 31/12/2025
 // In EUR, of voor effecten in vreemde munt: slotkoers in die munt + wisselkoers op 31/12/2025.
 // De wisselkoers wordt altijd per effect zelf ingevuld (kan per broker verschillen), nooit overgenomen.
+// De koers kan in beide richtingen: 1 EUR = … munt (ref_fx_per_eur) of 1 munt = … EUR (ref_eur_per_ccy).
 const hasVal = v => v != null && String(v).trim() !== "";
+const refFields = a => ({ ref_value_eur: a.ref_value_eur, ref_price: a.ref_price, ref_fx_per_eur: a.ref_fx_per_eur, ref_eur_per_ccy: a.ref_eur_per_ccy });
 function refInputs(ccy, a, placeholder) {
   const eur = `<input name="ref_value_eur" inputmode="decimal" class="num" value="${esc(a.ref_value_eur ?? "")}" placeholder="${esc(placeholder)}" aria-label="Waarde 31/12/2025 in EUR"`;
   if (!ccy || ccy === "EUR") return eur + ">";
+  const inv = hasVal(a.ref_eur_per_ccy) && !hasVal(a.ref_fx_per_eur);
   return `<div class="ref-fx" data-ccy="${esc(ccy)}">
     <label>Slotkoers in ${esc(ccy)} <input name="ref_price" inputmode="decimal" class="num" value="${esc(a.ref_price ?? "")}" placeholder="${esc(placeholder)}"></label>
-    <label>Wisselkoers: 1 EUR = … ${esc(ccy)} <input name="ref_fx_per_eur" inputmode="decimal" class="num" value="${esc(a.ref_fx_per_eur ?? "")}" placeholder="koers 31/12/2025"></label>
+    <span class="ref-fx-rate"><select name="ref_fx_dir" aria-label="Richting wisselkoers">
+        <option value="PER_EUR"${inv ? "" : " selected"}>1 EUR = … ${esc(ccy)}</option>
+        <option value="EUR_PER"${inv ? " selected" : ""}>1 ${esc(ccy)} = … EUR</option></select>
+      <input name="ref_fx" inputmode="decimal" class="num" value="${esc((inv ? a.ref_eur_per_ccy : a.ref_fx_per_eur) ?? "")}" placeholder="koers 31/12/2025" aria-label="Wisselkoers 31/12/2025"></span>
     <label>In EUR ${eur}${hasVal(a.ref_price) ? " readonly" : ""}></label></div>`;
 }
 /** Bereken de EUR-waarde live zodra slotkoers en wisselkoers ingevuld zijn. */
@@ -714,15 +740,20 @@ function syncRef(row) {
   const eurEl = $("[name=ref_value_eur]", row), filled = hasVal(p.value);
   eurEl.readOnly = filled;
   if (!filled) return;
-  try { eurEl.value = window.MWB.refValueFromCurrency(p.value, $("[name=ref_fx_per_eur]", row).value).toString(); } catch { eurEl.value = ""; }
+  try { eurEl.value = refFromFx(p.value, $("[name=ref_fx_dir]", row).value, $("[name=ref_fx]", row).value).toString(); } catch { eurEl.value = ""; }
+}
+function refFromFx(price, dir, rate) {
+  return dir === "EUR_PER" ? window.MWB.refValueFromEurRate(price, rate) : window.MWB.refValueFromCurrency(price, rate);
 }
 function readRef(row, label) {
   const p = $("[name=ref_price]", row);
   const price = p ? dec(p.value, `slotkoers 31/12/2025 voor ${label}`, { nonNegative: true }) : null;
   if (price == null)
-    return { ref_value_eur: dec($("[name=ref_value_eur]", row).value, `waarde 31/12/2025 voor ${label}`, { nonNegative: true }), ref_price: null, ref_fx_per_eur: null };
-  const fx = dec($("[name=ref_fx_per_eur]", row).value, `wisselkoers 31/12/2025 voor ${label}`, { required: true, positive: true });
-  return { ref_value_eur: window.MWB.refValueFromCurrency(price, fx).toString(), ref_price: price, ref_fx_per_eur: fx };
+    return { ref_value_eur: dec($("[name=ref_value_eur]", row).value, `waarde 31/12/2025 voor ${label}`, { nonNegative: true }), ref_price: null, ref_fx_per_eur: null, ref_eur_per_ccy: null };
+  const dir = $("[name=ref_fx_dir]", row).value;
+  const fx = dec($("[name=ref_fx]", row).value, `wisselkoers 31/12/2025 voor ${label}`, { required: true, positive: true });
+  return { ref_value_eur: refFromFx(price, dir, fx).toString(), ref_price: price,
+    ref_fx_per_eur: dir === "EUR_PER" ? null : fx, ref_eur_per_ccy: dir === "EUR_PER" ? fx : null };
 }
 
 // ================================================================ activa
@@ -791,7 +822,7 @@ $("#asset-table").addEventListener("click", async e => {
   const v = {}; $$("input, select", row).forEach(el => { v[el.name] = el.value.trim(); });
   try {
     const ccy = (v.currency || "EUR").toUpperCase();
-    const ref = ccy === "EUR" ? { ref_value_eur: dec(v.ref_value_eur, "waarde 31/12/2025", { nonNegative: true }), ref_price: null, ref_fx_per_eur: null }
+    const ref = ccy === "EUR" ? { ref_value_eur: dec(v.ref_value_eur, "waarde 31/12/2025", { nonNegative: true }), ref_price: null, ref_fx_per_eur: null, ref_eur_per_ccy: null }
       : readRef(row, isin);
     const code = v.isin.replace(/\s/g, "").toUpperCase();
     if (code && !isIsinCode(code)) throw new InputError("Een ISIN heeft 12 tekens: 2 letters, 9 letters of cijfers en een cijfer (bv. BE0003565737).");
@@ -1025,7 +1056,7 @@ function openImportDialog(r) {
     const known = [state.assets[p.asset], oldKey && state.assets[oldKey]].find(a => a && hasVal(a.ref_value_eur));
     const cur = known?.ref_value_eur;
     const ccy = String(r.assets?.[p.asset]?.currency || state.assets[p.asset]?.currency || "EUR").toUpperCase();
-    const val = known ? { ref_value_eur: cur, ref_price: known.ref_price, ref_fx_per_eur: known.ref_fx_per_eur } : { ref_value_eur: p.refHint?.value ?? "" };
+    const val = known ? refFields(known) : { ref_value_eur: p.refHint?.value ?? "" };
     return `<tr data-i="${i}" class="${p.suspicious ? "suspicious" : ""}">
       <td><input type="checkbox" name="keep" ${p.suspicious ? "" : "checked"} aria-label="Nog in bezit"></td>
       <td><strong>${esc(p.asset)}</strong>${p.name ? `<br><span class="small muted">${esc(p.name)}</span>` : ""}${p.suspicious ? `<br><span class="small neg">waarschijnlijk niet meer in bezit (overname, splitsing of naamswijziging?)</span>` : ""}</td>

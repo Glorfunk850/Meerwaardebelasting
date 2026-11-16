@@ -160,7 +160,7 @@ async function loadTransactions() {
       <td>${esc(t.asset)}</td>
       <td class="num">${["SPLIT", "DIVIDEND", "FEE"].includes(t.type) ? "" : num(t.quantity)}</td>
       <td class="num">${value}</td>
-      <td>${esc(t.currency)}${t.currency !== "EUR" ? ` <span class="muted small">@${num(t.fx_per_eur)}</span>` : ""}</td>
+      <td>${esc(t.currency)}${t.currency !== "EUR" ? ` <span class="muted small" title="${esc(t.eur_per_ccy ? `1 ${t.currency} = ${t.eur_per_ccy} EUR` : `1 EUR = ${t.fx_per_eur} ${t.currency}`)}">@${t.eur_per_ccy ? `${num(t.eur_per_ccy)} EUR` : num(t.fx_per_eur)}</span>` : ""}</td>
       <td>${esc(t.owner)}</td><td>${esc(t.broker)}</td>
       <td class="actions-cell">
         <button class="btn small" data-edit="${t.id}">Bewerk</button>
@@ -217,8 +217,15 @@ form.type.addEventListener("change", updateFieldVisibility);
 form.trade_date.addEventListener("change", updateFieldVisibility);
 form.cost_known.addEventListener("change", updateFieldVisibility);
 form.currency.addEventListener("input", () => {
-  if (form.currency.value.trim().toUpperCase() === "EUR") form.fx_per_eur.value = "1";
+  if (form.currency.value.trim().toUpperCase() === "EUR") form.fx.value = "1";
+  updateFxLabels();
 });
+/** Toon de munt in de keuze van de koersrichting (1 EUR = … USD / 1 USD = … EUR). */
+function updateFxLabels() {
+  const c = form.currency.value.trim().toUpperCase() || "munt";
+  const [perEur, eurPer] = form.fx_dir.options;
+  perEur.textContent = `1 EUR = … ${c}`; eurPer.textContent = `1 ${c} = … EUR`;
+}
 
 function openTxDialog(tx) {
   form.reset();
@@ -234,6 +241,10 @@ function openTxDialog(tx) {
   } else {
     form.trade_date.value = new Date().toISOString().slice(0, 10);
   }
+  const inv = !!(tx && tx.eur_per_ccy);
+  form.fx_dir.value = inv ? "EUR_PER" : "PER_EUR";
+  form.fx.value = tx ? (inv ? tx.eur_per_ccy : tx.fx_per_eur ?? "1") : "1";
+  updateFxLabels();
   updateFieldVisibility();
   dlg.showModal();
 }
@@ -272,11 +283,25 @@ async function loadAssets() {
       <td><input name="name" value="${esc(a.name)}"></td>
       <td><select name="asset_type">${assetTypes.map(t => `<option ${t === a.asset_type ? "selected" : ""}>${t}</option>`).join("")}</select></td>
       <td><input name="currency" value="${esc(a.currency)}" maxlength="5" style="min-width:60px"></td>
-      <td><input name="ref_value_eur" inputmode="decimal" class="num" value="${esc(a.ref_value_eur ?? "")}"
-          placeholder="${a.needs_ref ? "verplicht" : "n.v.t."}"></td>
+      <td>${refInputs(a)}</td>
       <td><input name="ref_source" value="${esc(a.ref_source)}" placeholder="bv. Euronext slotkoers"></td>
       <td class="actions-cell"><button class="btn small primary" data-save>Bewaar</button></td>
     </tr>`).join("");
+}
+/** Waarde 31/12/2025: in EUR, of voor vreemde munt slotkoers + wisselkoers (richting naar keuze);
+ *  de server rekent om naar EUR. */
+function refInputs(a) {
+  const ccy = (a.currency || "EUR").toUpperCase(), ph = a.needs_ref ? "verplicht" : "n.v.t.";
+  const eur = `<input name="ref_value_eur" inputmode="decimal" class="num" value="${esc(a.ref_value_eur ?? "")}" placeholder="${ph}" aria-label="Waarde 31/12/2025 in EUR"`;
+  if (ccy === "EUR") return eur + ">";
+  const inv = !!a.ref_eur_per_ccy && !a.ref_fx_per_eur;
+  return `<div class="ref-fx">
+    <label>Slotkoers in ${esc(ccy)} <input name="ref_price" inputmode="decimal" class="num" value="${esc(a.ref_price ?? "")}" placeholder="${ph}"></label>
+    <span class="ref-fx-rate"><select name="ref_fx_dir" aria-label="Richting wisselkoers">
+        <option value="PER_EUR"${inv ? "" : " selected"}>1 EUR = … ${esc(ccy)}</option>
+        <option value="EUR_PER"${inv ? " selected" : ""}>1 ${esc(ccy)} = … EUR</option></select>
+      <input name="ref_fx" inputmode="decimal" class="num" value="${esc((inv ? a.ref_eur_per_ccy : a.ref_fx_per_eur) ?? "")}" placeholder="koers 31/12/2025" aria-label="Wisselkoers 31/12/2025"></span>
+    <label>In EUR ${eur}${a.ref_price ? " readonly" : ""}></label></div>`;
 }
 $("#asset-table").addEventListener("click", async e => {
   const btn = e.target.closest("[data-save]");

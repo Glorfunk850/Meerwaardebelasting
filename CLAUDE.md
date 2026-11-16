@@ -3,9 +3,13 @@
 Rekenhulp voor de Belgische meerwaardebelasting (zie README.md). Communicatie met de eigenaar in het Nederlands.
 
 ## Werkwijze
-- Elke wijziging eerst als commit in deze repository (branch `main`), met groene tests.
-- Daarna pas de gebouwde `browser/index.html` publiceren op de bestaande claude.ai-pagina
+- Elke wijziging als commit op een eigen branch (nooit rechtstreeks naar `main` pushen), met groene tests,
+  en daarvan een pull request naar `main` openen. De eigenaar merget.
+- Pas na de merge de gebouwde `browser/index.html` van `main` publiceren op de bestaande claude.ai-pagina
   (artifact-slug `89e61c58-cfa4-48d1-9afc-65a63a42cb25`, link https://claude.ai/artifact/J2eLYeeUADSGqJ98q5auji).
+  Eerder publiceren enkel als de eigenaar daar uitdrukkelijk om vraagt; zeg dan dat de pagina vooruitloopt op `main`.
+- Wijkt de live pagina af van `main` (bv. werk van een andere branch dat nog niet gemerged is), niets overschrijven:
+  eerst uitzoeken welke branch het is en de eigenaar vragen wat er moet gebeuren.
   Een openbare pagina kan niet bijgewerkt worden: vraag de eigenaar ze tijdelijk privé te zetten.
 - Geen nieuwe pagina aanmaken: de opgeslagen gegevens van de gebruiker horen bij deze pagina.
 

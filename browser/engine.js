@@ -92,7 +92,8 @@
     return {
       trade_date: t.trade_date, type: t.type, asset: t.asset,
       quantity: D(t.quantity ?? 0), price: D(t.price ?? 0), currency: t.currency || "EUR",
-      fx_per_eur: D(t.fx_per_eur ?? 1), fees: D(t.fees ?? 0), taxes: D(t.taxes ?? 0),
+      fx_per_eur: D(t.fx_per_eur ?? 1),
+      eur_per_ccy: t.eur_per_ccy != null && t.eur_per_ccy !== "" ? D(t.eur_per_ccy) : null, fees: D(t.fees ?? 0), taxes: D(t.taxes ?? 0),
       owner: t.owner || "default", broker: t.broker || "",
       split_ratio: t.split_ratio != null && t.split_ratio !== "" ? D(t.split_ratio) : null,
       historic_proven: !!t.historic_proven, cost_known: t.cost_known !== false,
@@ -100,7 +101,12 @@
       delist_mode: t.delist_mode || "",
     };
   }
+  /** Omrekening naar EUR: met eur_per_ccy (1 munt = … EUR) als die ingevuld is, anders met fx_per_eur (1 EUR = … munt). */
   function toEur(t, amount) {
+    if (t.eur_per_ccy) {
+      if (!t.eur_per_ccy.gt(ZERO)) throw new Error(`Ongeldige wisselkoers in ${t.source}`);
+      return amount.mul(t.eur_per_ccy);
+    }
     if (!t.fx_per_eur.gt(ZERO)) throw new Error(`Ongeldige wisselkoers in ${t.source}`);
     return amount.div(t.fx_per_eur);
   }
@@ -340,12 +346,20 @@
     return p.div(fx).round(10);
   }
 
+  /** Idem, met de wisselkoers in de andere richting: 1 eenheid munt = eurPerUnit EUR; afgerond op 10 decimalen. */
+  function refValueFromEurRate(price, eurPerUnit) {
+    const p = D(price), r = D(eurPerUnit);
+    if (!r.gt(ZERO)) throw new Error("Wisselkoers op 31/12/2025 moet groter dan 0 zijn.");
+    if (p.lt(ZERO)) throw new Error("Slotkoers op 31/12/2025 mag niet negatief zijn.");
+    return p.mul(r).round(10);
+  }
+
   function compareMethods(transactions, refValues, cfg, withheld, throughYear) {
     const res = {};
     for (const m of ["FIFO", "GEMIDDELD"]) res[m] = calculate(transactions, refValues, { ...cfg, historicMethod: m }, withheld, throughYear);
     return res;
   }
 
-  const api = { Dec, D, ZERO, ONE, money, TxType, DelistModes, ACQ, defaultConfig, calculate, compareMethods, holdingsAt, refValueFromCurrency };
+  const api = { Dec, D, ZERO, ONE, money, TxType, DelistModes, ACQ, defaultConfig, calculate, compareMethods, holdingsAt, refValueFromCurrency, refValueFromEurRate };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.MWB = api;
 })(typeof window !== "undefined" ? window : globalThis);
