@@ -8,6 +8,7 @@ import pytest
 from engine import (
     BasisUsed,
     EngineConfig,
+    ExchangeComponent as C,
     HistoricMethod,
     FifoScope,
     TaxYearConfig,
@@ -421,3 +422,113 @@ def test_fx_in_both_directions_gives_same_result():
     assert s.proceeds_eur == D("105.86") and s.result_eur == D("20.73")
     with pytest.raises(ValueError):
         calculate([buy(date(2026, 1, 5), "US", 1, 1, currency="USD", eur_per_ccy=D("0"))], {})
+
+
+# ---------------------------------------------------------------- omruiling (fusie/overname)
+
+def ruil(d, asset, comps, cash=0, q=0, **kw):
+    return T(trade_date=d, type=TxType.RUIL, asset=asset, quantity=D(q), price=D(cash),
+             components=[C(a, D(r), None if v is None else D(v)) for a, r, v in comps], **kw)
+
+
+def test_exchange_before_2026_splits_historic_cost_by_value():
+    # 100 OUD @ 50; ruil: 0,5 NA (waarde 60) + 0,25 NB (waarde 40) + 10 cash -> gewichten 30/10/10 van 50
+    txs = [buy(date(2020, 1, 10), "OUD", 100, 50, historic_proven=True),
+           ruil(date(2023, 3, 31), "OUD", [("NA", "0.5", 60), ("NB", "0.25", 40)], cash=10),
+           sell(date(2026, 6, 1), "NA", 50, 70), sell(date(2026, 6, 1), "NB", 25, 35)]
+    rep = calculate(txs, {"NA": D("55"), "NB": D("30")})
+    na, nb = rep.sales
+    assert [(l.acquired, l.basis_used, l.basis_eur, l.result_eur) for l in na.lines] == [
+        (date(2020, 1, 10), BasisUsed.HISTORIC, D("3000.00"), D("500.00"))]  # 60 per NA > 55
+    assert [(l.basis_used, l.basis_eur, l.result_eur) for l in nb.lines] == [
+        (BasisUsed.HISTORIC, D("1000.00"), D("0"))]  # 40 per NB > 30, herleid tot 0
+    assert [e.kind for e in rep.events] == ["RUIL"] and rep.events[0].quantity == D("100")
+    assert "vóór 2026" in rep.events[0].note
+    assert not any("RUIL" in w or "Omruiling" in w for w in rep.warnings)
+
+
+def test_exchange_before_2026_without_values_uses_ref_only():
+    txs = [buy(date(2020, 1, 10), "OUD", 100, 50, historic_proven=True),
+           ruil(date(2023, 3, 31), "OUD", [("NA", "0.5", None), ("NB", "0.25", None)], cash=10),
+           sell(date(2026, 6, 1), "NA", 50, 70)]
+    rep = calculate(txs, {"NA": D("55")})
+    l = rep.sales[0].lines[0]
+    assert (l.basis_used, l.result_eur, l.missed_historic_eur) == (BasisUsed.REF_2025, D("750.00"), D("0"))
+    assert any("niet verdeeld" in w for w in rep.warnings)
+
+
+def test_exchange_single_component_transfers_cost():
+    txs = [buy(date(2024, 3, 1), "OUD", 10, 100, historic_proven=True),
+           ruil(date(2025, 6, 1), "OUD", [("NIEUW", "2", None)]),
+           sell(date(2026, 6, 1), "NIEUW", 20, 60)]
+    rep = calculate(txs, {"NIEUW": D("40")})
+    l = rep.sales[0].lines[0]
+    assert (l.basis_used, l.basis_eur, l.result_eur) == (BasisUsed.HISTORIC, D("1000.00"), D("200.00"))
+
+
+def test_exchange_from_2026_cash_is_sale_and_cost_carries_over():
+    txs = [buy(date(2026, 2, 1), "OUD", 10, 100),
+           ruil(date(2026, 6, 1), "OUD", [("NIEUW", "1", 90)], cash=30),
+           sell(date(2026, 9, 1), "NIEUW", 10, 95)]
+    rep = calculate(txs, {})
+    cash, s = rep.sales
+    assert (cash.kind, cash.proceeds_eur, cash.lines[0].basis_eur, cash.result_eur) == ("RUIL", D("300.00"), D("250.00"), D("50.00"))
+    assert (s.lines[0].acquired, s.lines[0].basis_eur, s.result_eur) == (date(2026, 2, 1), D("750.00"), D("200.00"))
+    assert rep.years[("default", 2026)].net_eur == D("250.00")
+
+
+def test_exchange_from_2026_of_pre_2026_lot_splits_ref_value():
+    # ref OUD 100; ruil 2 NIEUW (waarde 60) + 30 cash -> 120/150 = 0,8 en 0,2
+    txs = [buy(date(2025, 1, 5), "OUD", 10, 80),
+           ruil(date(2026, 6, 1), "OUD", [("NIEUW", "2", 60)], cash=30, currency="USD", fx_per_eur=D("1")),
+           sell(date(2026, 9, 1), "NIEUW", 20, 45)]
+    rep = calculate(txs, {"OUD": D("100")})
+    cash, s = rep.sales
+    assert (cash.lines[0].basis_used, cash.lines[0].basis_eur, cash.result_eur) == (BasisUsed.REF_2025, D("200.00"), D("100.00"))
+    assert (s.lines[0].basis_used, s.lines[0].basis_eur, s.result_eur) == (BasisUsed.REF_2025, D("800.00"), D("100.00"))
+
+
+def test_exchange_partial_quantity_and_no_position():
+    txs = [buy(date(2026, 1, 5), "OUD", 10, 100), buy(date(2026, 1, 6), "OUD", 10, 120),
+           ruil(date(2026, 3, 1), "OUD", [("NIEUW", "1", None)], q=15),
+           sell(date(2026, 4, 1), "OUD", 5, 130), sell(date(2026, 4, 1), "NIEUW", 15, 150)]
+    rep = calculate(txs, {})
+    oud, nieuw = rep.sales
+    assert oud.result_eur == D("50.00")                    # rest van lot 2 (120)
+    assert nieuw.result_eur == D("2250.00") - D("1600.00")  # 10 x 100 + 5 x 120
+    assert [l.acquired for l in nieuw.lines] == [date(2026, 1, 5), date(2026, 1, 6)]
+    rep = calculate([ruil(date(2026, 3, 1), "X", [("Y", "1", None)])], {})
+    assert rep.events[0].quantity == 0 and any("geen stuks in bezit" in w for w in rep.warnings)
+
+
+def test_exchange_errors():
+    with pytest.raises(ValueError, match="waarde per stuk"):
+        calculate([buy(date(2026, 1, 5), "OUD", 1, 1),
+                   ruil(date(2026, 3, 1), "OUD", [("A", "1", None), ("B", "1", 5)])], {})
+    with pytest.raises(ValueError, match="ratio"):
+        calculate([ruil(date(2023, 3, 1), "OUD", [("A", "0", None)])], {})
+    with pytest.raises(ValueError, match="zonder nieuwe effecten"):
+        calculate([ruil(date(2023, 3, 1), "OUD", [])], {})
+    with pytest.raises(ValueError, match="31/12/2025"):
+        calculate([buy(date(2025, 1, 5), "OUD", 1, 1), ruil(date(2026, 3, 1), "OUD", [("A", "1", None)])], {})
+
+
+def test_exchange_average_method_includes_received_lots():
+    cfg = EngineConfig(historic_method=HistoricMethod.AVERAGE)
+    txs = [buy(date(2021, 1, 5), "OUD", 10, 100, historic_proven=True),
+           ruil(date(2022, 1, 5), "OUD", [("N", "1", None)]),
+           buy(date(2024, 1, 5), "N", 10, 60, historic_proven=True),
+           sell(date(2026, 6, 1), "N", 20, 90)]
+    s = calculate(txs, {"N": D("70")}, cfg).sales[0]
+    assert [l.basis_used for l in s.lines] == [BasisUsed.HISTORIC, BasisUsed.HISTORIC]
+    assert s.result_eur == D("200.00")  # 20 x 90 - 20 x 80
+
+
+def test_exchange_notes_match_js():
+    rep = calculate([buy(date(2020, 1, 10), "OUD", 10, 5),
+                     ruil(date(2023, 3, 31), "OUD", [("NA", "0.1598", None), ("NB", "0.0376", None)], cash=D("1.0406"),
+                          currency="USD", fx_per_eur=D("1.08"))], {})
+    assert rep.events[0].note == (
+        "Omruiling vóór 2026 (0.1598 NA + 0.0376 NB + 1.0406 USD cash per stuk): geen belastbaar moment. "
+        "Voor de nieuwe effecten geldt hun waarde op 31/12/2025; de aankoopdatum en -prijs van OUD gaan over op de nieuwe effecten. "
+        "De aankoopprijs is niet verdeeld (waarde per nieuw stuk op de ruildatum niet ingevuld): geen hogere historische prijs mogelijk.")

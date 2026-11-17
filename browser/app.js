@@ -6,9 +6,11 @@ const GELD = window.GELD;
 const TYPE_LABELS = {
   BUY: "Aankoop", SELL: "Verkoop", SPLIT: "Splitsing", DIVIDEND: "Dividend", FEE: "Kosten",
   TRANSFER_IN: "Overdracht in", GIFT_IN: "Schenking", INHERIT_IN: "Erfenis", DELISTING: "Delisting",
+  RUIL: "Omruiling (fusie/overname)",
 };
 const DELIST_LABELS = { NOTERING: "Enkel schrapping notering", UITKOOP: "Uitkoop / bod tegen prijs", WAARDELOOS: "Waardeloos (faillissement/vereffening)" };
 const DELIST_SHORT = { NOTERING: "schrapping", UITKOOP: "uitkoop", WAARDELOOS: "waardeloos" };
+const EVENT_SHORT = { ...DELIST_SHORT, RUIL: "omruiling" };
 const BASIS_LABELS = { AANKOOP: "aankoopprijs", REF_31_12_2025: "waarde 31/12/2025", HISTORISCH: "historische prijs", ONBEKEND: "onbekend (0)" };
 const ACQ = ["BUY", "TRANSFER_IN", "GIFT_IN", "INHERIT_IN"];
 const ASSET_TYPES = ["aandeel", "etf", "obligatie", "fonds", "crypto", "valuta", "verzekering", "ander"];
@@ -204,6 +206,22 @@ function validateTx(p) {
       out.quantity = dec(p.quantity, "aantal", { positive: true }) ?? "0";
     }
   }
+  else if (p.type === "RUIL") {
+    out.quantity = dec(p.quantity, "aantal oude stuks", { positive: true }) ?? "0";
+    out.price = dec(p.price, "cash per oud stuk", { nonNegative: true }) ?? "0";
+    const comps = (p.components || []).filter(c => [c.asset, c.ratio, c.value].some(v => String(v ?? "").trim() !== ""));
+    if (!comps.length) throw new InputError("Vul minstens één nieuw effect in (naam en aantal per oud stuk).");
+    out.components = comps.map(c => {
+      const a = String(c.asset || "").trim().toUpperCase();
+      if (!a) throw new InputError("Naam van het nieuwe effect ontbreekt.");
+      if (a === asset) throw new InputError("Het nieuwe effect moet verschillen van het oude.");
+      return { asset: a, ratio: dec(c.ratio, `aantal ${a} per oud stuk`, { required: true, positive: true }),
+               value: dec(c.value, `waarde per stuk ${a}`, { nonNegative: true }) };
+    });
+    if (new Set(out.components.map(c => c.asset)).size < out.components.length) throw new InputError("Elk nieuw effect maar één keer invullen.");
+    if ((out.components.length > 1 || D(out.price).gt(0)) && out.components.some(c => c.value == null) && p.trade_date >= "2026-01-01")
+      throw new InputError("Vul voor elk nieuw effect de waarde per stuk op de ruildatum in (nodig vanaf 2026 om de aanschaffingswaarde te verdelen).");
+  }
   else out.amount = dec(p.amount, "bedrag", { required: true, nonNegative: true });
   if (!ACQ.includes(p.type) || p.type === "BUY") out.cost_known = true;
   if (!ACQ.includes(p.type) || p.trade_date >= "2026-01-01") out.historic_proven = false;
@@ -322,7 +340,7 @@ function renderReport() {
   const openSales = new Set($$("#sales details[open]").map(d => d.dataset.sale));
   $("#sales").innerHTML = r.sales.length ? r.sales.slice().reverse().map(s => `
     <details data-sale="${esc(s.source)}"${openSales.has(s.source) ? " open" : ""}><summary>
-      <span>${esc(s.trade_date)}</span><strong class="grow">${esc(assetLabel(s.asset))}${s.kind === "UITKOOP" ? ` <span class="badge SELL">uitkoop</span>` : ""}</strong>
+      <span>${esc(s.trade_date)}</span><strong class="grow">${esc(assetLabel(s.asset))}${s.kind === "UITKOOP" ? ` <span class="badge SELL">uitkoop</span>` : s.kind === "RUIL" ? ` <span class="badge SELL">cash bij omruiling</span>` : ""}</strong>
       <span class="muted small">${num(s.quantity.toString())} st.${s.broker ? " · " + esc(s.broker) : ""}</span>
       <span class="num ${signClass(s.result_eur.toFixed(2))}"><strong>${eur(s.result_eur.toFixed(2))}</strong></span>
       ${s.warnings.length ? `<span class="badge need" title="Waarschuwing">!</span>` : ""}
@@ -345,7 +363,7 @@ function renderReport() {
   $("#events-title").hidden = !ev.length;
   $("#events").innerHTML = ev.slice().reverse().map(e => `
     <div class="event"><div class="row"><span>${esc(e.trade_date)}</span><strong>${esc(assetLabel(e.asset))}</strong>
-      <span class="badge">${esc(DELIST_SHORT[e.kind])}</span>
+      <span class="badge">${esc(EVENT_SHORT[e.kind])}</span>
       <span class="muted small">${num(e.quantity_held.toString())} st. in bezit · ${esc(e.owner)}</span></div>
       <p class="small muted">${esc(e.note)}</p></div>`).join("");
 }
@@ -489,7 +507,7 @@ function reportPdf(now = new Date()) {
   blocks.push({ type: "h2", text: `Verkopen (${r.sales.length})` });
   if (!r.sales.length) blocks.push({ type: "p", color: "muted", text: "Nog geen verkopen vanaf 2026." });
   for (const s of r.sales) {
-    blocks.push({ type: "h3", text: `${s.trade_date} · ${assetLabel(s.asset)}${s.kind === "UITKOOP" ? " (uitkoop)" : ""} · resultaat ${m2(s.result_eur)}` });
+    blocks.push({ type: "h3", text: `${s.trade_date} · ${assetLabel(s.asset)}${s.kind === "UITKOOP" ? " (uitkoop)" : s.kind === "RUIL" ? " (cash bij omruiling)" : ""} · resultaat ${m2(s.result_eur)}` });
     const info = [`${num(s.quantity.toString())} st.`, s.owner, s.broker, `opbrengst ${m2(s.proceeds_eur)}`, `kosten ${m2(s.fees_eur)} (niet aftrekbaar)`];
     if (!s.reynders_deduction_eur.isZero()) info.push(`Reynders-aftrek ${m2(s.reynders_deduction_eur)}`);
     info.push(s.source);
@@ -515,7 +533,7 @@ function reportPdf(now = new Date()) {
   const ev = r.events.filter(e => e.kind !== "UITKOOP");
   if (ev.length) {
     blocks.push({ type: "h2", text: "Gebeurtenissen zonder belastbaar moment" });
-    for (const e of ev) blocks.push({ type: "p", text: `${e.trade_date} · ${assetLabel(e.asset)} · ${DELIST_SHORT[e.kind]} · ${num(e.quantity_held.toString())} st. in bezit · ${e.owner}` },
+    for (const e of ev) blocks.push({ type: "p", text: `${e.trade_date} · ${assetLabel(e.asset)} · ${EVENT_SHORT[e.kind]} · ${num(e.quantity_held.toString())} st. in bezit · ${e.owner}` },
       { type: "p", color: "muted", size: 8.5, text: e.note });
   }
 
@@ -705,6 +723,7 @@ function txRow(t, hasProof, missing) {
     const amt = t.type === "DIVIDEND" || t.type === "FEE";
     const value = t.type === "SPLIT" ? `${num(t.split_ratio)} : 1` : amt ? num(t.amount)
       : t.type === "DELISTING" ? (t.delist_mode === "UITKOOP" ? num(t.price) : "")
+      : t.type === "RUIL" ? `<span class="small">→ ${(t.components || []).map(c => `${num(c.ratio)} ${esc(c.asset)}`).join(" + ")}${D(t.price || 0).gt(0) ? ` + ${num(t.price)} cash` : ""}</span>`
       : num(t.price);
     return `<tr data-id="${t.id}" class="clickable" title="Tik om te bewerken">
       <td>${esc(t.trade_date)}</td>
@@ -714,7 +733,7 @@ function txRow(t, hasProof, missing) {
         ${t.type === "DELISTING" ? `<span class="badge">${esc(DELIST_SHORT[t.delist_mode] || "")}</span>` : ""}
         ${hasProof(t) ? `<span class="badge ok" title="Bewijsstukken">📎 ${t.attachments.length}</span>` : missing.has(t.id) ? `<span class="badge need" title="Nog geen bewijsstuk">geen bewijs</span>` : ""}</td>
       <td>${esc(t.asset)}</td>
-      <td class="num">${["SPLIT", "DIVIDEND", "FEE"].includes(t.type) || (t.type === "DELISTING" && D(t.quantity || 0).isZero()) ? "" : num(t.quantity)}</td>
+      <td class="num">${["SPLIT", "DIVIDEND", "FEE"].includes(t.type) || ((t.type === "DELISTING" || t.type === "RUIL") && D(t.quantity || 0).isZero()) ? "" : num(t.quantity)}</td>
       <td class="num">${value}</td>
       <td>${esc(t.currency)}${t.currency !== "EUR" ? ` <span class="muted small" title="${esc(fxLabel(t))}">@${hasVal(t.eur_per_ccy) ? `${num(t.eur_per_ccy)} EUR` : num(t.fx_per_eur)}</span>` : ""}</td>
       <td>${esc(t.owner)}</td><td>${esc(t.broker)}</td>
@@ -758,14 +777,16 @@ form.elements.delist_mode.innerHTML = Object.entries(DELIST_LABELS).map(([k, v])
 
 function updateFieldVisibility() {
   const t = form.elements.type.value, acq = ACQ.includes(t), sell = t === "SELL";
-  const dl = t === "DELISTING", mode = form.elements.delist_mode.value, buyout = dl && mode === "UITKOOP";
+  const dl = t === "DELISTING", mode = form.elements.delist_mode.value, buyout = dl && mode === "UITKOOP", ruil = t === "RUIL";
   const show = (cls, on) => $$(cls, form).forEach(el => { el.hidden = !on; });
-  show(".g-qty", acq || sell || buyout); show(".g-price", acq || sell || buyout);
+  show(".g-qty", acq || sell || buyout || ruil); show(".g-price", acq || sell || buyout || ruil);
   show(".g-amount", t === "DIVIDEND" || t === "FEE"); show(".g-split", t === "SPLIT");
   show(".g-ccy", t !== "SPLIT" && (!dl || buyout)); show(".g-fees", acq || sell || buyout); show(".g-reynders", sell);
-  show(".g-delist", dl);
-  $("#qty-label").firstChild.textContent = buyout ? "Aantal (leeg = volledige positie) " : "Aantal ";
-  $("#price-label").firstChild.textContent = buyout ? "Uitkoopprijs per stuk " : "Prijs per stuk ";
+  show(".g-delist", dl); show(".g-ruil", ruil);
+  if (ruil && !$("#ruil-rows").children.length) addRuilRow();
+  $("#qty-label").firstChild.textContent = buyout ? "Aantal (leeg = volledige positie) " : ruil ? "Aantal oude stuks (leeg = volledige positie) " : "Aantal ";
+  $("#price-label").firstChild.textContent = buyout ? "Uitkoopprijs per stuk " : ruil ? "Cash per oud stuk (leeg = geen) " : "Prijs per stuk ";
+  $("#asset-label").firstChild.textContent = ruil ? "Oud effect (naam) " : "Actief (naam) ";
   $("#delist-hint").textContent = dl ? {
     NOTERING: "Geen belastbaar moment: je positie blijft open met dezelfde aanschaffingswaarde. Registreer een latere verkoop apart.",
     UITKOOP: "Uitkoop, openbaar bod of squeeze-out: telt als verkoop van je stuks tegen de uitkoopprijs.",
@@ -777,6 +798,25 @@ function updateFieldVisibility() {
   form.elements.price.disabled = acq && t !== "BUY" && !form.elements.cost_known.checked;
 }
 ["type", "trade_date", "cost_known", "delist_mode"].forEach(n => form.elements[n].addEventListener("change", updateFieldVisibility));
+/** Eén regel 'nieuw effect' bij een omruiling (namen c_* worden apart ingelezen, zie readRuilRows). */
+function addRuilRow(c = {}) {
+  const row = document.createElement("div");
+  row.className = "ruil-row";
+  row.innerHTML = `<label>Nieuw effect (naam) <input name="c_asset" autocomplete="off" autocapitalize="characters" list="asset-list" value="${esc(c.asset)}"></label>
+    <label>Aantal per oud stuk <input name="c_ratio" inputmode="decimal" placeholder="bv. 0,1598" value="${esc(c.ratio)}"></label>
+    <label>Waarde per stuk op ruildatum <input name="c_value" inputmode="decimal" value="${esc(c.value)}"></label>
+    <button type="button" class="btn small danger" data-ruil-del aria-label="Verwijder dit effect">✕</button>`;
+  $("#ruil-rows").append(row);
+}
+const readRuilRows = () => $$(".ruil-row", form).map(r => ({ asset: $("[name=c_asset]", r).value.trim(),
+  ratio: $("[name=c_ratio]", r).value.trim(), value: $("[name=c_value]", r).value.trim() }));
+$("#ruil-add").addEventListener("click", () => addRuilRow());
+$("#ruil-rows").addEventListener("click", e => {
+  const b = e.target.closest("[data-ruil-del]");
+  if (!b) return;
+  $("#ruil-rows").removeChild(b.closest(".ruil-row"));
+  if (!$("#ruil-rows").children.length) addRuilRow();
+});
 form.elements.currency.addEventListener("input", () => { if (form.elements.currency.value.trim().toUpperCase() === "EUR") form.elements.fx.value = "1"; updateFxLabels(); });
 /** Toon de munt in de keuze van de koersrichting (1 EUR = … USD / 1 USD = … EUR). */
 function updateFxLabels() {
@@ -797,7 +837,10 @@ function openTxDialog(tx, { asNew = false } = {}) {
     const el = form.elements[k];
     if (el && el.name) { if (el.type === "checkbox") el.checked = !!v; else el.value = v ?? ""; }
   } else form.elements.trade_date.value = new Date().toISOString().slice(0, 10);
-  if (tx && tx.type === "DELISTING" && D(tx.quantity || 0).isZero()) form.elements.quantity.value = "";
+  if (tx && (tx.type === "DELISTING" || tx.type === "RUIL") && D(tx.quantity || 0).isZero()) form.elements.quantity.value = "";
+  if (tx && tx.type === "RUIL" && D(tx.price || 0).isZero()) form.elements.price.value = "";
+  $("#ruil-rows").innerHTML = "";
+  for (const c of tx?.type === "RUIL" ? tx.components || [] : []) addRuilRow(c);
   const inv = !!tx && hasVal(tx.eur_per_ccy);
   form.elements.fx_dir.value = inv ? "EUR_PER" : "PER_EUR";
   form.elements.fx.value = tx ? (inv ? tx.eur_per_ccy : tx.fx_per_eur ?? "1") : "1";
@@ -810,12 +853,14 @@ form.addEventListener("submit", e => {
   e.preventDefault();
   const data = {};
   for (const el of form.elements) {
-    if (!el.name || el.closest("[hidden]")) continue;
+    if (!el.name || el.name.startsWith("c_") || el.closest("[hidden]")) continue;
     data[el.name] = el.type === "checkbox" ? el.checked : el.value.trim();
   }
+  if (data.type === "RUIL") data.components = readRuilRows();
   try {
     const t = validateTx(data);
-    if (!state.assets[t.asset]) state.assets[t.asset] = { name: "", asset_type: "aandeel", currency: t.currency, ref_value_eur: null, ref_source: "" };
+    for (const a of [t.asset, ...(t.components || []).map(c => c.asset)])
+      if (!state.assets[a]) state.assets[a] = { name: "", asset_type: "aandeel", currency: t.currency, ref_value_eur: null, ref_source: "" };
     if (proofDraft.uploading) throw new InputError("Even wachten: er wordt nog een bestand opgeslagen.");
     const attachments = proofDraft.list.slice();
     if (editingId) {
@@ -918,6 +963,9 @@ function heldKeys() {
     const assets = new Set(hs.map(h => h.asset));
     for (const t of state.transactions) if (assets.has(t.asset)) keys.add(`${t.owner}\u0000${t.asset}`);
   }
+  // omgeruild effect: de oorspronkelijke aankoop blijft het bewijs voor de nieuwe effecten (laatste omruiling eerst)
+  const ruil = state.transactions.filter(t => t.type === "RUIL").sort((a, b) => a.trade_date < b.trade_date ? 1 : -1);
+  for (const t of ruil) if ((t.components || []).some(c => keys.has(`${t.owner}\u0000${c.asset}`))) keys.add(`${t.owner}\u0000${t.asset}`);
   return keys;
 }
 

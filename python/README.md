@@ -93,5 +93,8 @@ report = calculate(transactions, ref_values={"BE0003565737": Decimal("62.40")},
 
 - Historische prijs: FIFO per lot of gemiddelde (`HistoricMethod`); `compare_methods()` toont beide.
 - Wisselkoerswinst op cash in vreemde munt: niet berekend.
-- Fusies/ruil/andere corporate actions: niet automatisch; manueel te controleren.
+- Omruiling bij fusie/overname (`TxType.RUIL`, `components` = `ExchangeComponent(asset, ratio, value)`, `price` = cash per
+  oud stuk): loten gaan over met dezelfde aankoopdatum, aankoopprijs verdeeld volgens de waarde op de ruildatum; vanaf 2026
+  is de cash een verkoop. Eigen interpretatie, niet uitdrukkelijk geregeld (zie `browser/README.md`). Enkel in de rekenkern;
+  de webapp heeft er nog geen scherm voor. Andere corporate actions: niet automatisch; manueel te controleren.
 - Volgorde binnen dezelfde dag: invoervolgorde.

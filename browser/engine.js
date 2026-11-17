@@ -67,7 +67,7 @@
   const sum = arr => arr.reduce((a, b) => a.add(b), ZERO);
 
   // ------------------------------------------------------------ constanten
-  const TxType = ["BUY", "SELL", "SPLIT", "DIVIDEND", "FEE", "TRANSFER_IN", "GIFT_IN", "INHERIT_IN", "DELISTING"];
+  const TxType = ["BUY", "SELL", "SPLIT", "DIVIDEND", "FEE", "TRANSFER_IN", "GIFT_IN", "INHERIT_IN", "DELISTING", "RUIL"];
   const DelistModes = ["NOTERING", "UITKOOP", "WAARDELOOS"];
   const ACQ = new Set(["BUY", "TRANSFER_IN", "GIFT_IN", "INHERIT_IN"]);
   const START = "2026-01-01";
@@ -99,6 +99,9 @@
       historic_proven: !!t.historic_proven, cost_known: t.cost_known !== false,
       reynders_eur: D(t.reynders_eur ?? 0), amount: D(t.amount ?? 0), source: t.source || "",
       delist_mode: t.delist_mode || "",
+      // RUIL: nieuwe effecten per oud stuk; value = waarde per nieuw stuk op de ruildatum (in `currency`), om te verdelen
+      components: (t.components || []).map(c => ({ asset: String(c.asset ?? "").trim(), ratio: D(c.ratio ?? 0),
+        value: c.value != null && c.value !== "" ? D(c.value) : null })),
     };
   }
   /** Omrekening naar EUR: met eur_per_ccy (1 munt = … EUR) als die ingevuld is, anders met fx_per_eur (1 EUR = … munt). */
@@ -189,6 +192,10 @@
       sale.reynders_deduction_eur = ded;
       if (ded.lt(t.reynders_eur)) sale.warnings.push("Reynders-aftrek beperkt tot de positieve meerwaarde van deze verkoop.");
     }
+    return finishSale(sale);
+  }
+
+  function finishSale(sale) {
     const missed = sum(sale.lines.map(l => l.missed_historic_eur));
     if (missed.gt(ZERO))
       sale.warnings.push(`Mogelijk voordeel: de historische aankoopprijs ligt hoger dan de waarde op 31/12/2025, maar de aankoop is niet als bewijsbaar aangeduid. ` +
@@ -234,6 +241,8 @@
         } else sales.push(processSale(t, p, cfg));
       } else if (t.type === "DELISTING") {
         processDelisting(t, p, cfg, sales, events);
+      } else if (t.type === "RUIL") {
+        nextId = processExchange(t, p, pool, refValues, cfg, sales, events, nextId);
       } else if (t.type === "DIVIDEND") {
         const k = `${t.owner}|${t.trade_date.slice(0, 4)}`;
         dividends.set(k, (dividends.get(k) || ZERO).add(toEur(t, t.amount)));
@@ -241,7 +250,8 @@
     }
     const years = summarize(sales, dividends, cfg, withheld, throughYear);
     const warnings = sales.flatMap(s => s.warnings.map(w => `${s.trade_date} ${s.asset}: ${w}`))
-      .concat(events.filter(e => e.kind !== "UITKOOP").map(e => `${e.trade_date} ${e.asset}: ${e.note}`));
+      .concat(events.filter(e => e.kind !== "UITKOOP" && e.kind !== "RUIL").map(e => `${e.trade_date} ${e.asset}: ${e.note}`))
+      .concat(events.filter(e => e.warning).map(e => `${e.trade_date} ${e.asset}: ${e.warning}`));
     return { sales, years, warnings, events,
              disclaimer: "Deze berekening is een hulpmiddel en geen fiscaal advies. Controleer altijd met de officiële bronnen (FOD Financiën) of een adviseur." };
   }
@@ -277,6 +287,102 @@
     } else if (!held.gt(ZERO)) note = `Geen stuks in bezit op het moment van de delisting. ${note}`;
     events.push({ trade_date: t.trade_date, owner: t.owner, broker: t.broker, asset: t.asset, kind: mode,
                   quantity_held: held, note, source: t.source });
+  }
+
+  // ------------------------------------------------------------ omruiling (fusie, overname met ruil in aandelen)
+  /** Gewichten voor de verdeling van de aanschaffingswaarde over de nieuwe effecten en de cash (opleg), volgens hun
+   *  waarde op de ruildatum. Eén nieuw effect zonder cash: alles gaat over. Anders zijn alle waarden nodig; zonder → null. */
+  function exchangeWeights(t) {
+    const comps = t.components, cash = t.price;
+    if (comps.length === 1 && cash.isZero()) return { comps: [ONE], cash: ZERO };
+    if (comps.some(c => !c.value)) return null;
+    const parts = comps.map(c => c.ratio.mul(c.value)), total = sum(parts).add(cash);
+    if (!total.gt(ZERO)) return null;
+    return { comps: parts.map(x => x.div(total)), cash: cash.div(total) };
+  }
+
+  function processExchange(t, p, pool, refValues, cfg, sales, events, nextId) {
+    const comps = t.components;
+    if (!comps.length) throw new Error(`Omruiling zonder nieuwe effecten: ${t.source}`);
+    for (const c of comps) {
+      if (!c.asset) throw new Error(`Omruiling: naam van het nieuwe effect ontbreekt (${t.source})`);
+      if (c.asset === t.asset) throw new Error(`Omruiling: het nieuwe effect moet verschillen van ${t.asset} (${t.source})`);
+      if (!c.ratio.gt(ZERO)) throw new Error(`Omruiling: ratio voor ${c.asset} moet groter dan 0 zijn (${t.source})`);
+      if (c.value && c.value.lt(ZERO)) throw new Error(`Omruiling: waarde van ${c.asset} mag niet negatief zijn (${t.source})`);
+    }
+    if (t.price.lt(ZERO)) throw new Error(`Omruiling: cash per stuk mag niet negatief zijn (${t.source})`);
+    const late = t.trade_date >= START, w = exchangeWeights(t);
+    if (!w && late) throw new Error(`Omruiling van ${t.asset} op ${t.trade_date}: vul voor elk nieuw effect de waarde per stuk ` +
+      `op de ruildatum in (nodig om de aanschaffingswaarde te verdelen over de nieuwe effecten en de cash).`);
+    const held = sum(p.map(l => l.quantity));
+    const qty = t.quantity.gt(ZERO) ? Dec.min(t.quantity, held) : held;
+    const event = { trade_date: t.trade_date, owner: t.owner, broker: t.broker, asset: t.asset, kind: "RUIL",
+                    quantity_held: held, quantity: qty, components: comps, note: "", warning: "", source: t.source };
+    events.push(event);
+    if (!qty.gt(ZERO)) {
+      event.note = "Omruiling geregistreerd, maar er zijn geen stuks in bezit: niets omgeruild.";
+      event.warning = event.note;
+      return nextId;
+    }
+    // FIFO de omgeruilde stuks nemen (de loten blijven in de pool, zoals bij een verkoop)
+    const parts = [];
+    let remaining = qty;
+    for (const lot of p) {
+      if (!remaining.gt(ZERO)) break;
+      if (lot.quantity.isZero()) continue;
+      const q = Dec.min(remaining, lot.quantity);
+      parts.push({ lot, q }); remaining = remaining.sub(q); lot.quantity = lot.quantity.sub(q);
+    }
+    for (const { lot } of parts)
+      if (late && isPre(lot) && !lot.unitRef)
+        throw new Error(`Geen waarde op 31/12/2025 voor ${t.asset} (nodig voor de omruiling op ${t.trade_date} van het lot van ${lot.acquired}).`);
+    // nieuwe loten: zelfde verwervingsdatum, aanschaffingswaarde verdeeld volgens de waarde op de ruildatum
+    comps.forEach((c, i) => {
+      const f = w ? w.comps[i] : null;
+      const target = pool(poolKey({ owner: t.owner, broker: t.broker, asset: c.asset }, cfg.fifoScope));
+      for (const { lot, q } of parts) {
+        const n = q.mul(c.ratio);
+        let unitRef = null;
+        if (isPre(lot)) {
+          if (!late) { if (refValues[c.asset] != null && refValues[c.asset] !== "") unitRef = D(refValues[c.asset]); }
+          else unitRef = lot.unitRef.mul(f).div(c.ratio);
+        }
+        target.push({ lotId: nextId++, owner: lot.owner, broker: lot.broker, asset: c.asset, acquired: lot.acquired,
+                      quantity: n, origQuantity: n, unitCost: f ? lot.unitCost.mul(f).div(c.ratio) : ZERO,
+                      historicProven: lot.historicProven, costKnown: lot.costKnown && !!f, unitRef, source: t.source });
+      }
+    });
+    const per = comps.map(c => `${c.ratio} ${c.asset}`).join(" + ") + (t.price.gt(ZERO) ? ` + ${t.price} ${t.currency} cash` : "");
+    if (!late) {
+      event.note = `Omruiling vóór 2026 (${per} per stuk): geen belastbaar moment. Voor de nieuwe effecten geldt hun waarde op ` +
+        `31/12/2025; de aankoopdatum en -prijs van ${t.asset} gaan over op de nieuwe effecten` +
+        (w ? (comps.length > 1 || t.price.gt(ZERO) ? ", verdeeld volgens de waarde op de ruildatum (eigen interpretatie, te bevestigen)." : ".")
+           : ". De aankoopprijs is niet verdeeld (waarde per nieuw stuk op de ruildatum niet ingevuld): geen hogere historische prijs mogelijk.");
+      if (!w && parts.some(x => x.lot.costKnown)) event.warning = "Omruiling zonder waarde per nieuw stuk op de ruildatum: de historische aankoopprijs " +
+        `van ${t.asset} is niet verdeeld over ${comps.map(c => c.asset).join(", ")}, dus een hogere historische prijs kan niet gebruikt worden.`;
+      return nextId;
+    }
+    event.note = `Omruiling (${per} per stuk): voor het ruildeel geen belastbaar moment; de aanschaffingswaarde en de waarde op ` +
+      `31/12/2025 gaan over op de nieuwe effecten, verdeeld volgens de waarde op de ruildatum. Eigen interpretatie (fiscale ` +
+      `neutraliteit bij ruil van aandelen), niet uitdrukkelijk bevestigd.` + (t.price.gt(ZERO) ? " De cash (opleg) is als verkoop behandeld." : "");
+    if (t.price.gt(ZERO)) {
+      // cash: verkoop van het deel van de loten dat overeenkomt met het aandeel van de cash in de waarde
+      const total = money(toEur(t, qty.mul(t.price)));
+      const sale = { trade_date: t.trade_date, owner: t.owner, broker: t.broker, asset: t.asset, quantity: qty,
+                     proceeds_eur: total, fees_eur: money(toEur(t, t.fees.add(t.taxes))), lines: [],
+                     reynders_deduction_eur: ZERO, warnings: ["Cash bij omruiling (opleg): behandeld als verkoop van het " +
+                       "deel van de aandelen dat de cash vertegenwoordigt (eigen interpretatie, te bevestigen)."], source: t.source, kind: "RUIL" };
+      const scale = l => ({ ...l, unitCost: l.unitCost.mul(w.cash), unitRef: l.unitRef ? l.unitRef.mul(w.cash) : null });
+      const vpool = p.map(scale);
+      let allocated = ZERO;
+      parts.forEach(({ lot, q }, i) => {
+        const part = i === parts.length - 1 ? total.sub(allocated) : money(total.mul(q).div(qty));
+        allocated = allocated.add(part);
+        sale.lines.push(lineForLot(scale(lot), q, part, t.trade_date, vpool, cfg));
+      });
+      sales.push(finishSale(sale));
+    }
+    return nextId;
   }
 
   function summarize(sales, dividends, cfg, withheld, throughYear) {
@@ -338,8 +444,15 @@
       const p = pools.get(k).lots;
       if (ACQ.has(t.type)) p.push({ quantity: t.quantity });
       else if (t.type === "SPLIT" && t.split_ratio && t.split_ratio.gt(ZERO)) p.forEach(l => { l.quantity = l.quantity.mul(t.split_ratio); });
-      else if (t.type === "SELL" || (t.type === "DELISTING" && t.delist_mode === "UITKOOP")) {
-        let q = t.quantity.gt(ZERO) ? t.quantity : sum(p.map(l => l.quantity));
+      else if (t.type === "SELL" || (t.type === "DELISTING" && t.delist_mode === "UITKOOP") || t.type === "RUIL") {
+        const held = sum(p.map(l => l.quantity));
+        let q = t.quantity.gt(ZERO) ? Dec.min(t.quantity, held) : held;
+        if (t.type === "RUIL") for (const c of t.components) {
+          if (!c.asset || c.asset === t.asset || !c.ratio.gt(ZERO)) continue;
+          const k2 = poolKey({ ...t, asset: c.asset }, cfg.fifoScope);
+          if (!pools.has(k2)) pools.set(k2, { owner: t.owner, asset: c.asset, lots: [] });
+          pools.get(k2).lots.push({ quantity: q.mul(c.ratio) });
+        }
         for (const l of p) { if (!q.gt(ZERO)) break; const u = Dec.min(q, l.quantity); l.quantity = l.quantity.sub(u); q = q.sub(u); }
       }
     }

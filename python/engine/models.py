@@ -20,6 +20,7 @@ class TxType(str, Enum):
     GIFT_IN = "GIFT_IN"        # schenking: datum + prijs van de schenker
     INHERIT_IN = "INHERIT_IN"  # erfenis: datum + prijs van de erflater
     DELISTING = "DELISTING"    # schrapping notering; delist_mode bepaalt het fiscale gevolg
+    RUIL = "RUIL"              # omruiling bij fusie/overname: components = nieuwe effecten, price = cash per oud stuk
 
 
 class DelistMode(str, Enum):
@@ -36,6 +37,16 @@ class BasisUsed(str, Enum):
     REF_2025 = "REF_31_12_2025"   # fotowaarde
     HISTORIC = "HISTORISCH"       # bewezen hogere historische prijs (verkoop t.e.m. 2030)
     UNKNOWN = "ONBEKEND"          # geen aanschaffingswaarde gekend -> 0
+
+
+@dataclass
+class ExchangeComponent:
+    """Nieuw effect bij een omruiling: ratio = nieuwe stuks per oud stuk; value = waarde per nieuw stuk op de
+    ruildatum (in de munt van de transactie), nodig om de aanschaffingswaarde te verdelen."""
+
+    asset: str
+    ratio: Decimal
+    value: Optional[Decimal] = None
 
 
 @dataclass
@@ -63,6 +74,7 @@ class Transaction:
     delist_mode: str = ""           # voor DELISTING: NOTERING | UITKOOP | WAARDELOOS
     source: str = ""                # bv. "bolero.csv:12"
     eur_per_ccy: Optional[Decimal] = None  # koers in de andere richting: 1 munt = … EUR
+    components: list[ExchangeComponent] = field(default_factory=list)  # voor RUIL
 
     def to_eur(self, amount: Decimal) -> Decimal:
         if self.eur_per_ccy is not None:
@@ -120,7 +132,7 @@ class SaleResult:
     reynders_deduction_eur: Decimal = ZERO
     warnings: list[str] = field(default_factory=list)
     source: str = ""
-    kind: str = "VERKOOP"           # VERKOOP of UITKOOP (delisting)
+    kind: str = "VERKOOP"           # VERKOOP, UITKOOP (delisting) of RUIL (cash bij omruiling)
 
     @property
     def result_eur(self) -> Decimal:
@@ -135,10 +147,13 @@ class Event:
     owner: str
     broker: str
     asset: str
-    kind: str                       # DelistMode-waarde
+    kind: str                       # DelistMode-waarde of RUIL
     quantity_held: Decimal          # aantal in bezit vlak vóór de gebeurtenis
     note: str
     source: str = ""
+    quantity: Decimal = ZERO        # RUIL: omgeruild aantal
+    components: list[ExchangeComponent] = field(default_factory=list)
+    warning: str = ""               # RUIL: waarschuwing voor het rapport
 
 
 @dataclass

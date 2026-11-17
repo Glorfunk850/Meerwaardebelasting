@@ -32,6 +32,10 @@ kent delisting wel.
   geldt voor deze fictieve aanschaffingswaarde – te bevestigen).
 - Delisting: uitkoop/bod = verkoop; loutere schrapping of waardeloos zonder overdracht = geen belastbaar moment
   (eigen interpretatie, niet uitdrukkelijk geregeld).
+- Omruiling bij fusie/overname (oude aandelen → nieuwe aandelen, eventueel plus cash): de aankoopdatum en -prijs gaan
+  over op de nieuwe effecten, verdeeld volgens hun waarde op de ruildatum. Vóór 2026 geen belastbaar moment (voor de
+  nieuwe effecten geldt hun waarde op 31/12/2025). Vanaf 2026: ruildeel neutraal, cash (opleg) = verkoop van het deel
+  dat de cash vertegenwoordigt. Eigen interpretatie, niet uitdrukkelijk bevestigd (zie de README's).
 
 Open punten staan in de README van elke versie.
 

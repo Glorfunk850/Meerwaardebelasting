@@ -273,3 +273,87 @@ test("wisselkoers in beide richtingen geeft hetzelfde resultaat", () => {
   eq(s.proceeds_eur, "105.86"); eq(s.result_eur, "20.73");
   assert.throws(() => calculate([buy("2026-01-05", "US", 1, 1, { currency: "USD", eur_per_ccy: "0" })], {}));
 });
+
+// ---------------------------------------------------------------- omruiling (fusie/overname)
+const ruil = (d, a, comps, cash = 0, q = 0, kw = {}) => ({ trade_date: d, type: "RUIL", asset: a, quantity: String(q), price: String(cash),
+  components: comps.map(([asset, ratio, value]) => ({ asset, ratio, value: value == null ? null : String(value) })), ...kw });
+const lineSig = l => [l.acquired, l.basis_used, l.basis_eur.toFixed(2), l.result_eur.toFixed(2)];
+
+test("exchange before 2026 splits historic cost by value", () => {
+  const txs = [buy("2020-01-10", "OUD", 100, 50, { historic_proven: true }),
+    ruil("2023-03-31", "OUD", [["NA", "0.5", 60], ["NB", "0.25", 40]], 10),
+    sell("2026-06-01", "NA", 50, 70), sell("2026-06-01", "NB", 25, 35)];
+  const rep = calculate(txs, { NA: "55", NB: "30" });
+  const [na, nb] = rep.sales;
+  assert.deepEqual(na.lines.map(lineSig), [["2020-01-10", "HISTORISCH", "3000.00", "500.00"]]);
+  assert.deepEqual(nb.lines.map(lineSig), [["2020-01-10", "HISTORISCH", "1000.00", "0.00"]]);
+  assert.deepEqual(rep.events.map(e => e.kind), ["RUIL"]); eq(rep.events[0].quantity, "100");
+  assert.ok(rep.events[0].note.includes("vóór 2026"));
+  assert.ok(!rep.warnings.some(w => w.includes("Omruiling")));
+  assert.deepEqual(M.holdingsAt(txs, "2025-12-31").map(h => [h.asset, h.quantity.toString()]).sort(), [["NA", "50"], ["NB", "25"]]);
+});
+
+test("exchange before 2026 without values uses ref only", () => {
+  const txs = [buy("2020-01-10", "OUD", 100, 50, { historic_proven: true }),
+    ruil("2023-03-31", "OUD", [["NA", "0.5", null], ["NB", "0.25", null]], 10), sell("2026-06-01", "NA", 50, 70)];
+  const rep = calculate(txs, { NA: "55" });
+  const l = rep.sales[0].lines[0];
+  assert.equal(l.basis_used, "REF_31_12_2025"); eq(l.result_eur, "750"); eq(l.missed_historic_eur, "0");
+  assert.ok(rep.warnings.some(w => w.includes("niet verdeeld")));
+});
+
+test("exchange single component transfers cost", () => {
+  const txs = [buy("2024-03-01", "OUD", 10, 100, { historic_proven: true }), ruil("2025-06-01", "OUD", [["NIEUW", "2", null]]),
+    sell("2026-06-01", "NIEUW", 20, 60)];
+  assert.deepEqual(calculate(txs, { NIEUW: "40" }).sales[0].lines.map(lineSig), [["2024-03-01", "HISTORISCH", "1000.00", "200.00"]]);
+});
+
+test("exchange from 2026: cash is sale, cost carries over", () => {
+  const txs = [buy("2026-02-01", "OUD", 10, 100), ruil("2026-06-01", "OUD", [["NIEUW", "1", 90]], 30), sell("2026-09-01", "NIEUW", 10, 95)];
+  const rep = calculate(txs, {});
+  const [cash, s] = rep.sales;
+  assert.equal(cash.kind, "RUIL"); eq(cash.proceeds_eur, "300"); eq(cash.lines[0].basis_eur, "250"); eq(cash.result_eur, "50");
+  assert.deepEqual(s.lines.map(lineSig), [["2026-02-01", "AANKOOP", "750.00", "200.00"]]);
+  eq(year(rep, 2026).net_eur, "250");
+});
+
+test("exchange from 2026 of pre-2026 lot splits ref value", () => {
+  const txs = [buy("2025-01-05", "OUD", 10, 80), ruil("2026-06-01", "OUD", [["NIEUW", "2", 60]], 30, 0, { currency: "USD", fx_per_eur: "1" }),
+    sell("2026-09-01", "NIEUW", 20, 45)];
+  const [cash, s] = calculate(txs, { OUD: "100" }).sales;
+  assert.deepEqual(cash.lines.map(lineSig), [["2025-01-05", "REF_31_12_2025", "200.00", "100.00"]]);
+  assert.deepEqual(s.lines.map(lineSig), [["2025-01-05", "REF_31_12_2025", "800.00", "100.00"]]);
+});
+
+test("exchange partial quantity and no position", () => {
+  const txs = [buy("2026-01-05", "OUD", 10, 100), buy("2026-01-06", "OUD", 10, 120), ruil("2026-03-01", "OUD", [["NIEUW", "1", null]], 0, 15),
+    sell("2026-04-01", "OUD", 5, 130), sell("2026-04-01", "NIEUW", 15, 150)];
+  const [oud, nieuw] = calculate(txs, {}).sales;
+  eq(oud.result_eur, "50"); eq(nieuw.result_eur, "650");
+  assert.deepEqual(nieuw.lines.map(l => l.acquired), ["2026-01-05", "2026-01-06"]);
+  assert.deepEqual(M.holdingsAt(txs.slice(0, 3), "2026-03-01").map(h => [h.asset, h.quantity.toString()]), [["OUD", "5"], ["NIEUW", "15"]]);
+  const rep = calculate([ruil("2026-03-01", "X", [["Y", "1", null]])], {});
+  eq(rep.events[0].quantity, "0"); assert.ok(rep.warnings.some(w => w.includes("geen stuks in bezit")));
+});
+
+test("exchange errors", () => {
+  assert.throws(() => calculate([buy("2026-01-05", "OUD", 1, 1), ruil("2026-03-01", "OUD", [["A", "1", null], ["B", "1", 5]])], {}), /waarde per stuk/);
+  assert.throws(() => calculate([ruil("2023-03-01", "OUD", [["A", "0", null]])], {}), /ratio/);
+  assert.throws(() => calculate([ruil("2023-03-01", "OUD", [])], {}), /zonder nieuwe effecten/);
+  assert.throws(() => calculate([buy("2025-01-05", "OUD", 1, 1), ruil("2026-03-01", "OUD", [["A", "1", null]])], {}), /31\/12\/2025/);
+});
+
+test("exchange average method includes received lots", () => {
+  const cfg = { ...defaultConfig(), historicMethod: "GEMIDDELD" };
+  const txs = [buy("2021-01-05", "OUD", 10, 100, { historic_proven: true }), ruil("2022-01-05", "OUD", [["N", "1", null]]),
+    buy("2024-01-05", "N", 10, 60, { historic_proven: true }), sell("2026-06-01", "N", 20, 90)];
+  const s = calculate(txs, { N: "70" }, cfg).sales[0];
+  assert.deepEqual(s.lines.map(l => l.basis_used), ["HISTORISCH", "HISTORISCH"]); eq(s.result_eur, "200");
+});
+
+test("exchange notes match python", () => {
+  const rep = calculate([buy("2020-01-10", "OUD", 10, 5), ruil("2023-03-31", "OUD", [["NA", "0.1598", null], ["NB", "0.0376", null]], "1.0406", 0, { currency: "USD", fx_per_eur: "1.08" })], {});
+  assert.equal(rep.events[0].note, "Omruiling vóór 2026 (0.1598 NA + 0.0376 NB + 1.0406 USD cash per stuk): geen belastbaar moment. " +
+    "Voor de nieuwe effecten geldt hun waarde op 31/12/2025; de aankoopdatum en -prijs van OUD gaan over op de nieuwe effecten. " +
+    "De aankoopprijs is niet verdeeld (waarde per nieuw stuk op de ruildatum niet ingevuld): geen hogere historische prijs mogelijk.");
+});
