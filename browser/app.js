@@ -12,7 +12,7 @@ const DELIST_SHORT = { NOTERING: "schrapping", UITKOOP: "uitkoop", WAARDELOOS: "
 const BASIS_LABELS = { AANKOOP: "aankoopprijs", REF_31_12_2025: "waarde 31/12/2025", HISTORISCH: "historische prijs", ONBEKEND: "onbekend (0)" };
 const ACQ = ["BUY", "TRANSFER_IN", "GIFT_IN", "INHERIT_IN"];
 const ASSET_TYPES = ["aandeel", "etf", "obligatie", "fonds", "crypto", "valuta", "verzekering", "ander"];
-const TABS = ["rapport", "transacties", "activa", "instellingen"];
+const TABS = ["rapport", "simulatie", "transacties", "activa", "instellingen"];
 const DEFAULT_OWNER = "ik";
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -536,6 +536,135 @@ function reportPdf(now = new Date()) {
     date: now.toISOString(), blocks });
 }
 
+// ================================================================ simulatie (wat als ik verkoop?)
+const simForm = $("#sim-form");
+const simKey = (owner, asset) => `${owner}\u0000${asset}`;
+/** Posities op de gekozen datum (per eigenaar en actief). */
+function simHoldings() {
+  const date = simForm.elements.trade_date.value || new Date().toISOString().slice(0, 10);
+  const cfg = { ...defaultConfig(), fifoScope: state.settings.fifo_scope };
+  return window.MWB.holdingsAt(state.transactions, date, cfg).filter(h => h.asset !== "");
+}
+function fillSelect(sel, options, keep) {
+  sel.innerHTML = options.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join("");
+  if (options.some(([v]) => v === keep)) sel.value = keep;
+}
+/** Keuzelijsten bijwerken; `changed` = naam van het veld dat de gebruiker wijzigde. */
+function updateSimForm(changed) {
+  const el = simForm.elements, date = el.trade_date.value || new Date().toISOString().slice(0, 10);
+  const holdings = simHoldings();
+  const owners = [...new Set(holdings.map(h => h.owner))].sort();
+  fillSelect(el.owner, owners.map(o => [o, o]), el.owner.value || DEFAULT_OWNER);
+  const assets = holdings.filter(h => h.owner === el.owner.value).sort((a, b) => a.asset.localeCompare(b.asset));
+  fillSelect(el.asset, assets.map(h => [h.asset, `${assetLabel(h.asset)} (${num(h.quantity.toString())} st.)`]), el.asset.value);
+  $("#sim-empty").hidden = !!assets.length;
+  const perBroker = state.settings.fifo_scope === "BROKER";
+  $("#sim-broker").hidden = !perBroker;
+  const cfg = { ...defaultConfig(), fifoScope: state.settings.fifo_scope };
+  if (perBroker) {
+    const brokers = [...new Set(state.transactions.filter(t => t.owner === el.owner.value && t.asset === el.asset.value).map(t => t.broker || ""))]
+      .filter(b => window.SIM.heldAt(state.transactions, date, cfg, el.owner.value, el.asset.value, b).gt(0)).sort();
+    fillSelect(el.broker, brokers.map(b => [b, b || "(geen broker)"]), el.broker.value);
+  } else {
+    const last = state.transactions.filter(t => t.owner === el.owner.value && t.asset === el.asset.value && t.broker).pop();
+    fillSelect(el.broker, [[last ? last.broker : "", ""]], "");
+  }
+  const held = el.asset.value ? window.SIM.heldAt(state.transactions, date, cfg, el.owner.value, el.asset.value, perBroker ? el.broker.value : undefined) : D(0);
+  $("#sim-held").textContent = el.asset.value ? `In bezit op ${date}: ${num(held.toString())} st.` : "";
+  if (["owner", "asset", "broker", undefined].includes(changed) || !el.quantity.value) el.quantity.value = held.gt(0) ? held.toString() : "";
+  if (["owner", "asset", undefined].includes(changed)) {
+    const ccy = (state.assets[el.asset.value]?.currency || "EUR").toUpperCase();
+    if (el.currency.value.trim().toUpperCase() !== ccy) { el.currency.value = ccy; el.fx.value = "1"; el.fx_dir.value = "PER_EUR"; }
+  }
+  const c = el.currency.value.trim().toUpperCase() || "munt";
+  const [perEur, eurPer] = el.fx_dir.options;
+  perEur.textContent = `1 EUR = … ${c}`; eurPer.textContent = `1 ${c} = … EUR`;
+}
+let simInit = false;
+function renderSimulation() {
+  if (!simInit) { simForm.elements.trade_date.value = new Date().toISOString().slice(0, 10); simInit = true; }
+  updateSimForm();
+  $("#sim-result").innerHTML = ""; $("#sim-error").hidden = true; $("#sim-add-tx").hidden = true;
+}
+simForm.addEventListener("change", e => {
+  if (["owner", "asset", "broker", "trade_date", "currency", "fx_dir"].includes(e.target.name)) updateSimForm(e.target.name);
+  $("#sim-result").innerHTML = ""; $("#sim-add-tx").hidden = true;
+});
+simForm.elements.currency.addEventListener("input", () => { if (simForm.elements.currency.value.trim().toUpperCase() === "EUR") simForm.elements.fx.value = "1"; });
+function simTx() {
+  const el = simForm.elements;
+  if (!el.asset.value) throw new InputError("Kies een actief in portefeuille.");
+  return validateTx({ type: "SELL", trade_date: el.trade_date.value, asset: el.asset.value, owner: el.owner.value,
+    broker: el.broker.value, quantity: el.quantity.value.trim(), price: el.price.value.trim(),
+    currency: el.currency.value, fx_dir: el.fx_dir.value, fx: el.fx.value.trim() });
+}
+simForm.addEventListener("submit", e => {
+  e.preventDefault();
+  const err = $("#sim-error");
+  err.hidden = true; $("#sim-result").innerHTML = ""; $("#sim-add-tx").hidden = true;
+  let t, r;
+  try {
+    t = simTx();
+    const [txs, refs, cfg, withheld] = engineInputs();
+    r = window.SIM.simulate(txs, refs, cfg, withheld, [t]);
+  } catch (ex) {
+    err.innerHTML = (ex instanceof InputError ? esc(ex.message) : `<strong>Kan niet rekenen.</strong> ${esc(ex.message)}`) +
+      (/31\/12\/2025/.test(ex.message) ? ` <a href="#activa">Vul de waarde in bij Activa.</a>` : "") +
+      (/inkomstenjaar/.test(ex.message) ? ` <a href="#instellingen">Voeg het jaar toe bij Instellingen.</a>` : "");
+    err.hidden = false;
+    return;
+  }
+  $("#sim-result").innerHTML = simResultHtml(t, r);
+  $("#sim-add-tx").hidden = false;
+});
+$("#sim-add-tx").addEventListener("click", () => {
+  let t;
+  try { t = simTx(); } catch (ex) { toast(ex.message, true); return; }
+  location.hash = "transacties";
+  openTxDialog({ ...t, note: "" }, { asNew: true });
+});
+
+function simResultHtml(t, r) {
+  const f = v => eur(v.toFixed(2));
+  const s = r.sales[0], year = Number(t.trade_date.slice(0, 4));
+  const own = r.years.filter(y => y.owner === t.owner);
+  const main = own.find(y => y.year === year);
+  const dTax = r.tax_delta_eur;
+  const head = dTax.gt(0) ? ["Extra belasting door deze verkoop", "neg"] : dTax.lt(0) ? ["Deze verkoop verlaagt je belasting met", "pos"] : ["Extra belasting door deze verkoop", ""];
+  const rate = s.result_eur.gt(0) && dTax.gt(0) ? ` (${nf.format(Number(dTax.div(s.result_eur).mul(100).toFixed(2)))}% van de meerwaarde)` : "";
+  const later = state.transactions.some(x => x.owner === t.owner && x.asset === t.asset && x.trade_date > t.trade_date && (x.type === "SELL" || x.type === "DELISTING"));
+  const metrics = [["Netto meerwaarde", "net_eur"], ["Vrijstelling beschikbaar", "exemption_available_eur"], ["Belastbaar", "taxable_eur"],
+                   ["Belasting", "tax_eur"], ["Nieuwe overdracht (naar latere jaren)", "carry_generated_eur"]];
+  const yearTables = own.filter(y => y.changed).map(y => `<div class="table-wrap"><table>
+      <thead><tr><th>${y.year} · ${esc(y.owner)}</th><th class="num">Zonder</th><th class="num">Met verkoop</th><th class="num">Verschil</th></tr></thead>
+      <tbody>${metrics.map(([label, k]) => `<tr><td>${label}</td><td class="num">${f(y.before[k])}</td><td class="num">${f(y.after[k])}</td>
+        <td class="num ${k === "tax_eur" ? signClass(y.delta[k].neg().toFixed(2)) : ""}">${y.delta[k].isZero() ? "–" : (y.delta[k].gt(0) ? "+" : "") + f(y.delta[k])}</td></tr>`).join("")}
+        <tr><td>Nog belastingvrij te realiseren</td><td class="num">${f(y.room_before_eur)}</td><td class="num">${f(y.room_after_eur)}</td><td></td></tr>
+      </tbody></table></div>`).join("");
+  return `<article class="card">
+    <div class="sim-head"><span>${head[0]}</span><span class="big ${head[1]}">${f(dTax.lt(0) ? dTax.neg() : dTax)}</span></div>
+    <p class="small muted" style="margin:.3rem 0 0">${esc(t.trade_date)} · verkoop ${num(t.quantity)} st. ${esc(assetLabel(t.asset))} ·
+      opbrengst ${f(s.proceeds_eur)} · ${s.result_eur.gte(0) ? "meerwaarde" : "minderwaarde"}
+      <strong class="${signClass(s.result_eur.toFixed(2))}">${f(s.result_eur)}</strong>${rate}</p>
+    ${main ? `<p class="small" style="margin:.4rem 0 0">Nog belastingvrij te realiseren in ${year}: ${f(main.room_before_eur)} vóór deze verkoop,
+      ${f(main.room_after_eur)} erna.</p>` : ""}
+  </article>
+  <h3>Verkochte loten (FIFO)</h3>
+  <div class="table-wrap"><table><thead><tr><th>Lot (aankoop)</th><th class="num">Aantal</th><th class="num">Opbrengst</th>
+    <th class="num">Basis</th><th>Basis volgens</th><th class="num">Resultaat</th><th>Opmerking</th></tr></thead>
+  <tbody>${s.lines.map(l => `<tr><td>${esc(l.acquired || "–")}</td><td class="num">${num(l.quantity.toString())}</td>
+    <td class="num">${f(l.proceeds_eur)}</td><td class="num">${f(l.basis_eur)}</td><td>${esc(BASIS_LABELS[l.basis_used])}</td>
+    <td class="num ${signClass(l.result_eur.toFixed(2))}">${f(l.result_eur)}</td><td class="small">${esc(l.note)}</td></tr>`).join("")}</tbody></table></div>
+  ${r.warnings.map(w => `<div class="alert warn small">${esc(w)}</div>`).join("")}
+  ${later ? `<div class="alert warn small">Na deze datum staan er al verkopen van dit actief. Door FIFO verschuiven de loten van die latere
+    verkopen; dat zit mee in het verschil hieronder.</div>` : ""}
+  <h3>Impact per jaar</h3>
+  ${yearTables ? `<div class="sim-years">${yearTables}</div>` : `<p class="muted">Geen verschil in de jaaroverzichten.</p>`}
+  <p class="hint">Kosten en taksen bij de verkoop zijn niet aftrekbaar en tellen hier niet mee. Een lagere nieuwe overdracht betekent
+    minder extra vrijstelling in latere jaren. Bij opt-in houdt je broker de belasting meteen in (op de waarde van 31/12/2025 voor
+    oudere aankopen); wat te veel ingehouden is, recupereer je via de aangifte. Rekenhulp, geen fiscaal advies.</p>`;
+}
+
 // ================================================================ transacties
 let txShow = "all"; // tx | cash | all
 function renderTransactions() {
@@ -656,12 +785,13 @@ function updateFxLabels() {
   perEur.textContent = `1 EUR = … ${c}`; eurPer.textContent = `1 ${c} = … EUR`;
 }
 
-function openTxDialog(tx) {
+/** tx: bestaande transactie om te bewerken, of met { asNew: true } een vooraf ingevulde nieuwe transactie. */
+function openTxDialog(tx, { asNew = false } = {}) {
   form.reset();
-  editingId = tx ? tx.id : null;
-  $("#tx-title").textContent = tx ? "Transactie bewerken" : "Nieuwe transactie";
+  editingId = tx && !asNew ? tx.id : null;
+  $("#tx-title").textContent = editingId ? "Transactie bewerken" : "Nieuwe transactie";
   $("#tx-error").hidden = true;
-  $("#btn-delete-tx").hidden = !tx;
+  $("#btn-delete-tx").hidden = !editingId;
   form.elements.owner.value = DEFAULT_OWNER;
   if (tx) for (const [k, v] of Object.entries(tx)) {
     const el = form.elements[k];
@@ -673,7 +803,7 @@ function openTxDialog(tx) {
   form.elements.fx.value = tx ? (inv ? tx.eur_per_ccy : tx.fx_per_eur ?? "1") : "1";
   updateFxLabels();
   updateFieldVisibility();
-  openProofs(tx);
+  openProofs(asNew ? null : tx);
   dlg.showModal();
 }
 form.addEventListener("submit", e => {
@@ -1533,7 +1663,7 @@ function render() {
   const tab = currentTab();
   $$(".tabs a").forEach(a => a.classList.toggle("active", a.getAttribute("href") === `#${tab}`));
   $$(".tab").forEach(s => s.classList.toggle("active", s.id === `tab-${tab}`));
-  ({ rapport: renderReport, transacties: renderTransactions, activa: renderAssets, instellingen: renderSettings })[tab]();
+  ({ rapport: renderReport, simulatie: renderSimulation, transacties: renderTransactions, activa: renderAssets, instellingen: renderSettings })[tab]();
   const missing = Object.entries(state.assets).filter(([i, a]) => needsRef(i) && (a.ref_value_eur == null || a.ref_value_eur === "")).length;
   $("#assets-dot").hidden = !missing;
 }

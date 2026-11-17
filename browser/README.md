@@ -17,6 +17,7 @@ De versie die op je claude.ai-link draait. Alles werkt in de browser; er is geen
 | `xlsx.js` | Minimale Excel-lezer zonder externe bibliotheek |
 | `geld.js` | Geldbewegingen (stortingen, opnames, kapitaalverminderingen, ...): soorten, dubbels, geldoverzicht per jaar |
 | `bewijs.js` | Bewijsstukken bij transacties: toegelaten bestandstypes, welke transacties nog een bewijs missen |
+| `simulatie.js` | Simulatie: impact van een fictieve verkoop (rekent met en zonder via de rekenkern, vergelijkt per jaar; bewaart niets) |
 | `pdf.js` | Rapport als PDF (minimale PDF-generator zonder externe bibliotheek, Helvetica met WinAnsi-tekens) |
 | `build.py` | Voegt alles samen tot `index.html` |
 | `manifest.webmanifest`, `sw.js`, `icon*` | Installeerbare app (PWA) op GitHub Pages; niet gebruikt op claude.ai |
@@ -32,6 +33,7 @@ node --test saxo.test.js         # Saxo-importer (synthetisch bestand)
 node --test bewijs.test.js       # bewijsstukken
 node --test pdf.test.js          # PDF-generator
 node --test geld.test.js         # geldbewegingen en geldoverzicht
+node --test simulatie.test.js    # simulatie van een verkoop
 
 # optioneel tegen je eigen exports:
 BOLERO_FILE=pad/naar/cashmovements.xlsx node --test bolero.test.js   # of .csv
@@ -65,6 +67,15 @@ bestanden van de ene plaats op de andere niet te openen.
 
 De filter *Bewijs ontbreekt* toont verwervingen van activa die nog in bezit zijn en verkopen die belastbaar zijn
 (vanaf 2026) of van activa die nog in bezit zijn, zonder bewijsstuk.
+
+## Simulatie
+
+Op het tabblad *Simulatie* kies je een positie, een datum, het aantal en een verkoopprijs. De tool rekent al je transacties
+twee keer door met dezelfde rekenkern, zonder en met die verkoop, en toont: de meer- of minderwaarde van de verkoop per lot
+(FIFO, met de gebruikte basis), het verschil in belasting, hoeveel meerwaarde er dat jaar nog belastingvrij bij kan (voor en na),
+en de gevolgen voor latere jaren (minder overdraagbare vrijstelling). Er wordt niets bewaard; met *Als transactie toevoegen*
+open je het gewone transactievenster met de gegevens al ingevuld. Ligt de datum vóór bestaande verkopen van hetzelfde actief,
+dan verschuift FIFO bij die latere verkopen; dat zit mee in het verschil. Kosten en taksen tellen niet mee (niet aftrekbaar).
 
 ## Eigen keuzes en interpretaties
 

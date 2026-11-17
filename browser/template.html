@@ -164,6 +164,11 @@ td.cash-what { white-space: normal; min-width: 15rem; }
 .ref-edit input { width: 150px; } .ref-edit input[name=ref_source] { width: 220px; }
 .event { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: .7rem .9rem; margin-bottom: .5rem; }
 .event p { margin: .35rem 0 0; }
+.sim-head { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem 1rem; flex-wrap: wrap; }
+.sim-head .big { font-size: 1.7rem; }
+.sim-years { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 560px), 1fr)); gap: 1rem; margin-top: .5rem; }
+.sim-years td:first-child { color: var(--muted); white-space: normal; }
+@media (max-width: 600px) { .sim-years table { font-size: .82rem; } .sim-years th, .sim-years td { padding: .45rem .3rem; } }
 
 dialog { border: 0; border-radius: 14px; padding: 0; width: min(680px, 96vw); max-height: 92vh; box-shadow: 0 20px 60px rgba(0,0,0,.25); color: var(--ink); }
 dialog::backdrop { background: rgba(20, 30, 40, .45); }
@@ -206,6 +211,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
   </div>
   <nav class="tabs">
     <a href="#rapport">Rapport</a>
+    <a href="#simulatie">Simulatie</a>
     <a href="#transacties">Transacties</a>
     <a href="#activa">Activa<span class="dot" id="assets-dot" hidden></span></a>
     <a href="#instellingen">Instellingen</a>
@@ -229,6 +235,32 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     <div id="sales" class="sales"></div>
     <h3 id="events-title" hidden>Gebeurtenissen zonder belastbaar moment</h3>
     <div id="events"></div>
+  </section>
+
+  <section id="tab-simulatie" class="tab">
+    <div class="toolbar"><h2>Simulatie</h2></div>
+    <p class="muted small" style="margin-top:0">Wat als je (een deel van) een positie verkoopt? De tool rekent je bestaande transacties
+      door met en zonder deze verkoop en toont het verschil. Er wordt niets bewaard tot je de verkoop zelf als transactie toevoegt.</p>
+    <form id="sim-form" class="panel" novalidate>
+      <div class="grid">
+        <label class="field">Eigenaar <select name="owner"></select></label>
+        <label class="field">Datum verkoop <input name="trade_date" type="date"></label>
+        <label class="field">Actief <select name="asset"></select></label>
+        <label class="field" id="sim-broker">Broker <select name="broker"></select></label>
+        <label class="field">Aantal <input name="quantity" inputmode="decimal"><span class="hint" id="sim-held"></span></label>
+        <label class="field">Verkoopprijs per stuk <input name="price" inputmode="decimal" placeholder="bv. huidige koers"></label>
+        <label class="field">Munt <input name="currency" value="EUR" maxlength="5" autocapitalize="characters"></label>
+        <div class="field"><span>Wisselkoers <select name="fx_dir" aria-label="Richting wisselkoers">
+            <option value="PER_EUR">1 EUR = … munt</option><option value="EUR_PER">1 munt = … EUR</option></select></span>
+          <input name="fx" value="1" inputmode="decimal" aria-label="Wisselkoers"></div>
+      </div>
+      <p id="sim-empty" class="hint" hidden>Er zijn op deze datum geen posities om te verkopen.</p>
+      <div class="actions" style="margin-top:.3rem">
+        <button type="button" class="btn ghost" id="sim-add-tx" hidden>Als transactie toevoegen</button>
+        <button class="btn primary">Bereken impact</button></div>
+    </form>
+    <div id="sim-error" class="alert error" hidden></div>
+    <div id="sim-result"></div>
   </section>
 
   <section id="tab-transacties" class="tab">
@@ -444,6 +476,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
 <script>/*SAXO*/</script>
 <script>/*BEWIJS*/</script>
 <script>/*PDF*/</script>
+<script>/*SIMULATIE*/</script>
 <script>/*APP*/</script>
 </body>
 </html>
