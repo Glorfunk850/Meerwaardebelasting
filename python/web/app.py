@@ -192,7 +192,7 @@ def create_app(db_path: str | Path | None = None) -> Flask:
     @app.get("/api/meta")
     def meta():
         return jsonify(
-            tx_types=[t.value for t in TxType],
+            tx_types=[t.value for t in TxType if t != TxType.RUIL],  # omruiling: enkel in de browserversie
             asset_types=ASSET_TYPES,
             historic_methods=[m.value for m in HistoricMethod],
             fifo_scopes=[m.value for m in FifoScope],

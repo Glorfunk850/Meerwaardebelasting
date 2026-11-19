@@ -16,6 +16,7 @@ from .models import (
     BasisUsed,
     DelistMode,
     Event,
+    ExchangeComponent,
 )
 from .config import EngineConfig, TaxYearConfig, HistoricMethod, FifoScope, DEFAULT_YEARS
 from .calculator import calculate, compare_methods, ref_value_from_currency, ref_value_from_eur_rate
@@ -31,6 +32,7 @@ __all__ = [
     "BasisUsed",
     "DelistMode",
     "Event",
+    "ExchangeComponent",
     "EngineConfig",
     "TaxYearConfig",
     "HistoricMethod",

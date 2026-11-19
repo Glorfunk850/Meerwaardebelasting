@@ -29,6 +29,7 @@ from .models import (
     BasisUsed,
     DelistMode,
     Event,
+    ExchangeComponent,
     Lot,
     Report,
     SaleLine,
@@ -189,11 +190,15 @@ def calculate(
             dividends[(tx.owner, tx.trade_date.year)] += tx.to_eur(tx.amount)
         elif tx.type == TxType.DELISTING:
             _process_delisting(tx, pool, cfg, sales, events)
+        elif tx.type == TxType.RUIL:
+            next_id = _process_exchange(tx, pool, pools, ref_values, cfg, sales, events, next_id)
         # FEE: enkel registratie
 
     years = _summarize(sales, dividends, cfg, withheld, through_year)
     warnings = [f"{s.trade_date} {s.asset}: {w}" for s in sales for w in s.warnings]
-    warnings += [f"{e.trade_date} {e.asset}: {e.note}" for e in events if e.kind != DelistMode.UITKOOP.value]
+    warnings += [f"{e.trade_date} {e.asset}: {e.note}" for e in events
+                 if e.kind not in (DelistMode.UITKOOP.value, TxType.RUIL.value)]
+    warnings += [f"{e.trade_date} {e.asset}: {e.warning}" for e in events if e.warning]
     return Report(sales=sales, years=years, warnings=warnings, events=events)
 
 
@@ -277,6 +282,10 @@ def _process_sale(tx: Transaction, pool: list[Lot], cfg: EngineConfig) -> SaleRe
         sale.reynders_deduction_eur = ded
         if ded < tx.reynders_eur:
             sale.warnings.append("Reynders-aftrek beperkt tot de positieve meerwaarde van deze verkoop.")
+    return _finish_sale(sale)
+
+
+def _finish_sale(sale: SaleResult) -> SaleResult:
     missed = sum((l.missed_historic_eur for l in sale.lines), ZERO)
     if missed > 0:
         sale.warnings.append(
@@ -290,6 +299,151 @@ def _process_sale(tx: Transaction, pool: list[Lot], cfg: EngineConfig) -> SaleRe
             "Historische aankoopprijs gebruikt: zelf inroepen in de aangifte en bewijsstukken bewaren."
         )
     return sale
+
+
+# ---------------------------------------------------------------- omruiling (fusie, overname met ruil in aandelen)
+
+def _exchange_weights(tx: Transaction) -> Optional[tuple[list[Decimal], Decimal]]:
+    """Verdeling van de aanschaffingswaarde over de nieuwe effecten en de cash (opleg), volgens hun waarde op de
+    ruildatum. Eén nieuw effect zonder cash: alles gaat over. Anders zijn alle waarden nodig; zonder -> None."""
+    comps, cash = tx.components, tx.price
+    if len(comps) == 1 and cash == 0:
+        return [Decimal(1)], ZERO
+    if any(not c.value for c in comps):
+        return None
+    parts = [c.ratio * c.value for c in comps]
+    total = sum(parts, ZERO) + cash
+    if total <= 0:
+        return None
+    return [x / total for x in parts], cash / total
+
+
+def _fmt(x: Decimal) -> str:
+    """Zoals Dec.toString in engine.js: zonder exponent en zonder nullen achteraan."""
+    s = format(x, "f")
+    return s.rstrip("0").rstrip(".") if "." in s else s
+
+
+def _process_exchange(tx: Transaction, pool: list[Lot], pools, ref_values: Mapping[str, Decimal],
+                      cfg: EngineConfig, sales: list[SaleResult], events: list[Event], next_id: int) -> int:
+    comps = tx.components
+    if not comps:
+        raise ValueError(f"Omruiling zonder nieuwe effecten: {tx.source}")
+    for c in comps:
+        if not c.asset:
+            raise ValueError(f"Omruiling: naam van het nieuwe effect ontbreekt ({tx.source})")
+        if c.asset == tx.asset:
+            raise ValueError(f"Omruiling: het nieuwe effect moet verschillen van {tx.asset} ({tx.source})")
+        if c.ratio <= 0:
+            raise ValueError(f"Omruiling: ratio voor {c.asset} moet groter dan 0 zijn ({tx.source})")
+        if c.value is not None and c.value < 0:
+            raise ValueError(f"Omruiling: waarde van {c.asset} mag niet negatief zijn ({tx.source})")
+    if tx.price < 0:
+        raise ValueError(f"Omruiling: cash per stuk mag niet negatief zijn ({tx.source})")
+    late = tx.trade_date >= cfg.start_date
+    w = _exchange_weights(tx)
+    if w is None and late:
+        raise ValueError(
+            f"Omruiling van {tx.asset} op {tx.trade_date}: vul voor elk nieuw effect de waarde per stuk "
+            "op de ruildatum in (nodig om de aanschaffingswaarde te verdelen over de nieuwe effecten en de cash)."
+        )
+    held = sum((l.quantity for l in pool), ZERO)
+    qty = min(tx.quantity, held) if tx.quantity > 0 else held
+    event = Event(tx.trade_date, tx.owner, tx.broker, tx.asset, TxType.RUIL.value, held, "", tx.source,
+                  quantity=qty, components=list(comps))
+    events.append(event)
+    if qty <= 0:
+        event.note = event.warning = "Omruiling geregistreerd, maar er zijn geen stuks in bezit: niets omgeruild."
+        return next_id
+
+    parts: list[tuple[Lot, Decimal]] = []
+    remaining = qty
+    for lot in pool:
+        if remaining <= 0:
+            break
+        if lot.quantity == 0:
+            continue
+        q = min(remaining, lot.quantity)
+        parts.append((lot, q))
+        remaining -= q
+        lot.quantity -= q
+    for lot, _ in parts:
+        if late and lot.pre_2026 and lot.unit_ref_eur is None:
+            raise ValueError(
+                f"Geen waarde op 31/12/2025 voor {tx.asset} (nodig voor de omruiling op {tx.trade_date} "
+                f"van het lot van {lot.acquired})."
+            )
+
+    # nieuwe loten: zelfde verwervingsdatum, aanschaffingswaarde verdeeld volgens de waarde op de ruildatum
+    for i, c in enumerate(comps):
+        f = w[0][i] if w else None
+        target = pools[_pool_key(replace(tx, asset=c.asset), cfg.fifo_scope)]
+        for lot, q in parts:
+            n = q * c.ratio
+            unit_ref = None
+            if lot.pre_2026:
+                if not late:
+                    if c.asset in ref_values and ref_values[c.asset] not in (None, ""):
+                        unit_ref = Decimal(ref_values[c.asset])
+                else:
+                    unit_ref = lot.unit_ref_eur * f / c.ratio
+            target.append(Lot(
+                lot_id=next_id, owner=lot.owner, broker=lot.broker, asset=c.asset, acquired=lot.acquired,
+                quantity=n, orig_quantity=n, unit_cost_eur=lot.unit_cost_eur * f / c.ratio if f is not None else ZERO,
+                historic_proven=lot.historic_proven, cost_known=lot.cost_known and f is not None,
+                source=tx.source, unit_ref_eur=unit_ref,
+            ))
+            next_id += 1
+
+    per = " + ".join(f"{_fmt(c.ratio)} {c.asset}" for c in comps) + (
+        f" + {_fmt(tx.price)} {tx.currency} cash" if tx.price > 0 else "")
+    if not late:
+        if w:
+            tail = (", verdeeld volgens de waarde op de ruildatum (eigen interpretatie, te bevestigen)."
+                    if len(comps) > 1 or tx.price > 0 else ".")
+        else:
+            tail = (". De aankoopprijs is niet verdeeld (waarde per nieuw stuk op de ruildatum niet ingevuld): "
+                    "geen hogere historische prijs mogelijk.")
+        event.note = (f"Omruiling vóór 2026 ({per} per stuk): geen belastbaar moment. Voor de nieuwe effecten geldt "
+                      f"hun waarde op 31/12/2025; de aankoopdatum en -prijs van {tx.asset} gaan over op de nieuwe "
+                      f"effecten{tail}")
+        if not w and any(lot.cost_known for lot, _ in parts):
+            event.warning = (
+                "Omruiling zonder waarde per nieuw stuk op de ruildatum: de historische aankoopprijs "
+                f"van {tx.asset} is niet verdeeld over {', '.join(c.asset for c in comps)}, dus een hogere "
+                "historische prijs kan niet gebruikt worden."
+            )
+        return next_id
+
+    event.note = (
+        f"Omruiling ({per} per stuk): voor het ruildeel geen belastbaar moment; de aanschaffingswaarde en de waarde op "
+        "31/12/2025 gaan over op de nieuwe effecten, verdeeld volgens de waarde op de ruildatum. Eigen interpretatie "
+        "(fiscale neutraliteit bij ruil van aandelen), niet uitdrukkelijk bevestigd."
+        + (" De cash (opleg) is als verkoop behandeld." if tx.price > 0 else "")
+    )
+    if tx.price > 0:
+        # cash: verkoop van het deel van de loten dat overeenkomt met het aandeel van de cash in de waarde
+        wc = w[1]
+        total = money(tx.to_eur(qty * tx.price))
+        sale = SaleResult(
+            trade_date=tx.trade_date, owner=tx.owner, broker=tx.broker, asset=tx.asset, quantity=qty,
+            proceeds_eur=total, fees_eur=money(tx.to_eur(tx.fees + tx.taxes)), source=tx.source, kind="RUIL",
+            warnings=["Cash bij omruiling (opleg): behandeld als verkoop van het deel van de aandelen dat de cash "
+                      "vertegenwoordigt (eigen interpretatie, te bevestigen)."],
+        )
+
+        def scale(l: Lot) -> Lot:
+            return replace(l, unit_cost_eur=l.unit_cost_eur * wc,
+                           unit_ref_eur=l.unit_ref_eur * wc if l.unit_ref_eur is not None else None)
+
+        vpool = [scale(l) for l in pool]
+        allocated = ZERO
+        for i, (lot, q) in enumerate(parts):
+            part = total - allocated if i == len(parts) - 1 else money(total * q / qty)
+            allocated += part
+            sale.lines.append(_line_for_lot(scale(lot), q, part, tx.trade_date, vpool, cfg))
+        sales.append(_finish_sale(sale))
+    return next_id
 
 
 def _summarize(sales, dividends, cfg: EngineConfig, withheld, through_year) -> dict:

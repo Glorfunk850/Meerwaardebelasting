@@ -82,6 +82,23 @@ dan verschuift FIFO bij die latere verkopen; dat zit mee in het verschil. Kosten
 - Delisting: enkel een uitkoop/bod tegen prijs is een overdracht (verkoop); een loutere schrapping of waardeloos worden
   zonder overdracht is geen belastbaar moment. Niet uitdrukkelijk in de wet geregeld.
 - Historische prijs bij meerdere aankopen vóór 2026: FIFO per lot of gemiddelde (instelbaar; het rapport toont het verschil).
+- Omruiling (fusie/overname), transactietype *Omruiling*: oud effect, aantal oude stuks (leeg = volledige positie), per
+  nieuw effect het aantal per oud stuk en de waarde per stuk op de ruildatum, en eventueel cash per oud stuk.
+  - De omgeruilde loten (FIFO) worden nieuwe loten met **dezelfde aankoopdatum**; de aankoopprijs (en, vanaf 2026, de
+    waarde op 31/12/2025) wordt verdeeld volgens de waarde op de ruildatum: aantal × waarde per nieuw effect, plus de cash.
+    Bij één nieuw effect zonder cash gaat alles over en is de waarde niet nodig. Bewijsbaarheid gaat mee over.
+  - Vóór 2026: geen belastbaar moment; voor de nieuwe effecten geldt hun eigen waarde op 31/12/2025 (vul die in bij
+    Activa). Zonder waarden op de ruildatum wordt de aankoopprijs niet verdeeld: dan geen hogere historische prijs
+    (met melding).
+  - Vanaf 2026: ruildeel geen belastbaar moment; de cash (opleg) telt als verkoop van het deel van de loten dat de cash
+    vertegenwoordigt. Waarden op de ruildatum zijn dan verplicht (behalve bij één nieuw effect zonder cash).
+  - **Open punt:** de wet van 6.4.2026 en circulaire 2026/C/74 regelen (voor zover nagegaan, nov. 2026) niet uitdrukkelijk
+    hoe de historische aankoopprijs verdeeld wordt over effecten uit een omruiling vóór 2026, noch of een ruil vanaf 2026
+    fiscaal neutraal is. De verdeling volgens de waarde op de ruildatum en de neutraliteit van het ruildeel zijn een eigen
+    interpretatie, te bevestigen bij de FOD Financiën of een adviseur.
+  - Fracties die in cash uitbetaald werden: registreer een verkoop van het nieuwe effect op dezelfde datum. Staan de
+    nieuwe effecten ook als aankoop in de export van je broker, verwijder die aankoop (anders tellen ze dubbel).
+  - Een aankoop van een omgeruild effect telt voor *Bewijs ontbreekt* als 'in bezit' zolang de nieuwe effecten in bezit zijn.
 - Valutawinst op cash in vreemde munt wordt niet berekend.
 - Bolero: wisselkoers staat niet in de export; afgeleid uit wisseltransacties of geschat uit het nettobedrag (gemarkeerd).
 - Bolero: de Excel-export wordt omgezet naar dezelfde regels als de CSV-export. Transacties die al geïmporteerd zijn

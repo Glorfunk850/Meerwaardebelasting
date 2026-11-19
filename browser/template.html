@@ -189,6 +189,12 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
 [hidden] { display: none !important; }
 .proofs { border: 1px solid var(--line); border-radius: 10px; padding: .55rem .7rem; margin: .5rem 0; }
 .proofs .row { justify-content: space-between; }
+.ruil { margin: .6rem 0; }
+.ruil-row { display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: .4rem; margin: .35rem 0; align-items: end; }
+.ruil-row label { font-size: .8rem; display: flex; flex-direction: column; gap: .15rem; min-width: 0; }
+.ruil-row input { width: 100%; min-width: 0; }
+@media (max-width: 520px) { .ruil-row { grid-template-columns: 1fr 1fr auto; } .ruil-row label:first-child { grid-column: 1 / 3; }
+  .ruil-row button { grid-column: 3; grid-row: 1; } .ruil-row label:nth-child(3) { grid-column: 2 / 4; } }
 .proofs ul { list-style: none; margin: .4rem 0 0; padding: 0; }
 .proofs li { display: flex; gap: .5rem; align-items: center; padding: .25rem 0; border-top: 1px solid var(--line); font-size: .9rem; }
 .proofs li:first-child { border-top: 0; }
@@ -362,7 +368,9 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
       overdracht van het ongebruikte deel van de eerste schijf van € 1.000, 5 jaar geldig; fotowaarde 31/12/2025; hogere bewezen
       historische prijs tot verkopen t.e.m. 31/12/2030, nooit tot een minderwaarde; minderwaarden enkel binnen hetzelfde jaar;
       kosten en taksen niet aftrekbaar; FIFO. Delisting: enkel een uitkoop/bod tegen prijs is een overdracht (verkoop);
-      een loutere schrapping of waardeloos worden zonder overdracht is geen belastbaar moment (eigen interpretatie, niet uitdrukkelijk geregeld).</p>
+      een loutere schrapping of waardeloos worden zonder overdracht is geen belastbaar moment (eigen interpretatie, niet uitdrukkelijk geregeld).
+      Omruiling (fusie/overname): aankoopdatum en -prijs gaan over op de nieuwe effecten, verdeeld volgens de waarde op de ruildatum;
+      vanaf 2026 telt de cash als verkoop (eigen interpretatie, niet uitdrukkelijk geregeld).</p>
   </section>
 </main>
 
@@ -372,7 +380,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     <div class="grid">
       <label class="field">Type <select name="type" required></select></label>
       <label class="field">Datum <input name="trade_date" type="date" required></label>
-      <label class="field">Actief (naam) <input name="asset" required autocomplete="off" autocapitalize="characters" list="asset-list"></label>
+      <label class="field" id="asset-label">Actief (naam) <input name="asset" required autocomplete="off" autocapitalize="characters" list="asset-list"></label>
       <label class="field">Eigenaar <input name="owner" list="owner-list"></label>
       <label class="field">Broker <input name="broker" list="broker-list" placeholder="bv. Bolero, Saxo"></label>
       <label class="field g-delist">Soort delisting <select name="delist_mode"></select></label>
@@ -390,6 +398,17 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     </div>
     <label class="check g-costknown"><input type="checkbox" name="cost_known" checked> Aanschaffingswaarde is gekend</label>
     <label class="check g-hist"><input type="checkbox" name="historic_proven"> Ik kan deze aankoopprijs bewijzen (hogere historische prijs, verkopen t.e.m. 2030)</label>
+    <div class="g-ruil ruil">
+      <strong class="small">Nieuwe effecten per oud stuk</strong>
+      <div id="ruil-rows"></div>
+      <button type="button" class="btn small ghost" id="ruil-add">+ Nieuw effect</button>
+      <p class="hint">Bv. bij een overname: 0,1598 nieuw aandeel A + 0,0376 nieuw aandeel B + 1,0406 USD cash per oud aandeel.
+        De <em>waarde per nieuw stuk op de ruildatum</em> (in de munt hierboven) is nodig om de aankoopprijs te verdelen over de
+        nieuwe effecten en de cash; bij één nieuw effect zonder cash mag ze leeg blijven. Vóór 2026 is een omruiling geen
+        belastbaar moment; vanaf 2026 rekent de tool de cash als verkoop. Fracties die in cash uitbetaald werden: registreer die
+        als verkoop van het nieuwe effect op dezelfde datum. Staan de nieuwe effecten ook als aankoop in je export, verwijder
+        die aankoop dan (anders tellen ze dubbel).</p>
+    </div>
     <p class="alert warn small g-delist" id="delist-hint"></p>
     <p class="hint g-gift">Bij schenking of erfenis: vul de datum en prijs van de oorspronkelijke eigenaar in.</p>
     <label class="field">Notitie <input name="note"></label>
