@@ -532,3 +532,30 @@ def test_exchange_notes_match_js():
         "Omruiling vóór 2026 (0.1598 NA + 0.0376 NB + 1.0406 USD cash per stuk): geen belastbaar moment. "
         "Voor de nieuwe effecten geldt hun waarde op 31/12/2025; de aankoopdatum en -prijs van OUD gaan over op de nieuwe effecten. "
         "De aankoopprijs is niet verdeeld (waarde per nieuw stuk op de ruildatum niet ingevuld): geen hogere historische prijs mogelijk.")
+
+
+def ruil_q(d, asset, comps, cash=0, **kw):
+    """Omruiling met het totaal ontvangen aantal per nieuw effect (zoals uit een import)."""
+    return T(trade_date=d, type=TxType.RUIL, asset=asset, price=D(cash),
+             components=[C(a, value=None if v is None else D(v), quantity=D(q)) for a, q, v in comps], **kw)
+
+
+def test_exchange_total_quantity_splits_cost_by_value():
+    # 100 OUD @ 10; 20 NA (waarde 25) + 30 NB (waarde 10) + 2 cash per oud stuk -> per oud stuk 5 / 3 / 2 van 10
+    txs = [buy(date(2020, 1, 10), "OUD", 40, 10, historic_proven=True), buy(date(2021, 1, 10), "OUD", 60, 10, historic_proven=True),
+           ruil_q(date(2023, 3, 31), "OUD", [("NA", 20, 25), ("NB", 30, 10)], cash=2),
+           sell(date(2026, 6, 1), "NA", 20, 30)]
+    rep = calculate(txs, {"NA": D("22")})
+    s = rep.sales[0]
+    assert [(l.acquired, l.quantity, l.basis_used, l.basis_eur) for l in s.lines] == [
+        (date(2020, 1, 10), D("8"), BasisUsed.HISTORIC, D("200.00")), (date(2021, 1, 10), D("12"), BasisUsed.HISTORIC, D("300.00"))]
+    assert s.result_eur == D("100.00")
+    assert "NA (20 st. in totaal) + NB (30 st. in totaal) + 2 EUR cash" in rep.events[0].note
+
+
+def test_exchange_total_quantity_is_exact_over_lots():
+    txs = [buy(date(2020, 1, 1), "OUD", 1, 3), buy(date(2020, 2, 1), "OUD", 1, 3), buy(date(2020, 3, 1), "OUD", 1, 3),
+           ruil_q(date(2023, 1, 1), "OUD", [("N", 1, None)]), sell(date(2026, 2, 1), "N", 1, 12)]
+    s = calculate(txs, {"N": D("10")}).sales[0]
+    assert len(s.lines) == 3 and sum(l.quantity for l in s.lines) == 1
+    assert not s.warnings and s.result_eur == D("2.01")  # 3 loten x (4,00 - 3,33): afronding per lot

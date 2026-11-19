@@ -195,6 +195,22 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
 .ruil-row input { width: 100%; min-width: 0; }
 @media (max-width: 520px) { .ruil-row { grid-template-columns: 1fr 1fr auto; } .ruil-row label:first-child { grid-column: 1 / 3; }
   .ruil-row button { grid-column: 3; grid-row: 1; } .ruil-row label:nth-child(3) { grid-column: 2 / 4; } }
+.exch { border: 1px solid var(--accent); border-radius: var(--radius); background: var(--accent-soft); padding: .8rem .9rem; margin: .5rem 0; }
+.exch.off { opacity: .6; }
+.exch h4 { margin: 0 0 .3rem; font-size: .95rem; }
+.exch .why { font-size: .78rem; color: var(--muted); margin: 0; }
+.exch-comp { display: grid; grid-template-columns: auto minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1.3fr); gap: .3rem .8rem; align-items: start;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: .55rem .7rem; margin-top: .45rem; }
+.exch-comp .lbl { display: block; font-size: .72rem; color: var(--muted); }
+.exch-comp .via { grid-column: 2 / -1; font-size: .78rem; color: var(--muted); }
+.exch-comp input[type=checkbox] { width: 18px; height: 18px; margin-top: .3rem; }
+.exch-comp input:not([type]) { width: 100%; font-size: 14px; padding: .3rem .45rem; }
+.exch-box { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: .55rem .7rem; margin-top: .5rem; }
+.exch-cols { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; margin-top: .6rem; }
+.exch-cols table { font-size: .84rem; } .exch-cols th, .exch-cols td { padding: .35rem .45rem; white-space: normal; }
+.exch .alert { margin: .3rem 0 0; font-size: .84rem; }
+#imp-warnings li.done { text-decoration: line-through; opacity: .7; }
+@media (max-width: 640px) { .exch-comp { grid-template-columns: auto 1fr 1fr; } .exch-comp .val { grid-column: 2 / -1; } .exch-cols { grid-template-columns: 1fr; } }
 .proofs ul { list-style: none; margin: .4rem 0 0; padding: 0; }
 .proofs li { display: flex; gap: .5rem; align-items: center; padding: .25rem 0; border-top: 1px solid var(--line); font-size: .9rem; }
 .proofs li:first-child { border-top: 0; }
@@ -436,13 +452,21 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
   <details id="imp-skipped-wrap"><summary class="small muted">Niet geïmporteerd</summary><ul id="imp-skipped" class="small"></ul></details>
   <label class="field" style="max-width:240px;margin-top:.8rem">Eigenaar <input id="imp-owner" list="owner-list"></label>
   <h3>Posities op 31/12/2025 controleren</h3>
-  <p class="hint">De export bevat geen splitsingen, overnames, naamswijzigingen of effecten die je van een andere bank overzette.
+  <p class="hint">De export bevat geen splitsingen, naamswijzigingen of effecten die je van een andere bank overzette, en overnames
+    maar gedeeltelijk (een omruiling wordt waar mogelijk herkend en als voorstel getoond onder de tabel).
     Vink uit wat je op 31/12/2025 niet meer had; de tool boekt het dan uit vóór 2026 (geen belastbaar moment).
     Vul de slotkoers op 31/12/2025 per stuk in als je die kent; ze is pas nodig wanneer je het effect verkoopt.
     Voor effecten in een andere munt vul je de slotkoers in die munt in, plus de wisselkoers van 31/12/2025
     (1 EUR = … munt of 1 munt = … EUR, kies de richting); de tool rekent om naar EUR. Vul de koers per effect zelf in: ze kan per broker verschillen.</p>
   <div class="table-wrap"><table id="imp-positions"><thead><tr><th>Bezit</th><th>Effect</th><th class="num">Aantal</th>
     <th class="col-div">Laatste dividend</th><th class="num">Waarde 31/12/2025</th></tr></thead><tbody></tbody></table></div>
+  <div id="imp-exch-wrap" hidden>
+    <h3>Omruilingen (fusie/overname)</h3>
+    <p class="hint">De export legt geen verband tussen een verdwenen effect en de effecten die je ervoor kreeg. De tool stelt een omruiling
+      voor op basis van de export; kijk ze na en bevestig. Vóór 2026 is een omruiling geen belastbaar moment. De aankoopdatum en -prijs gaan
+      over op de nieuwe effecten, verdeeld volgens de waarde op de ruildatum (eigen interpretatie, te bevestigen).</p>
+    <div id="imp-exch"></div>
+  </div>
   <div id="imp-delist-wrap" hidden>
     <h3>Delistings</h3>
     <p class="hint">De broker meldt dat de notering van deze effecten stopte terwijl je ze nog had. Kreeg je geld voor je stuks
@@ -485,7 +509,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
 </div></dialog>
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
-<datalist id="asset-list"></datalist><datalist id="owner-list"></datalist>
+<datalist id="asset-list"></datalist><datalist id="owner-list"></datalist><datalist id="exch-assets"></datalist>
 <datalist id="broker-list"><option value="Bolero"><option value="Saxo"></datalist>
 
 <script>/* Rekenkern meerwaardebelasting (algemeen regime) — JavaScript-versie van engine/calculator.py.
@@ -589,8 +613,11 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
       historic_proven: !!t.historic_proven, cost_known: t.cost_known !== false,
       reynders_eur: D(t.reynders_eur ?? 0), amount: D(t.amount ?? 0), source: t.source || "",
       delist_mode: t.delist_mode || "",
-      // RUIL: nieuwe effecten per oud stuk; value = waarde per nieuw stuk op de ruildatum (in `currency`), om te verdelen
-      components: (t.components || []).map(c => ({ asset: String(c.asset ?? "").trim(), ratio: D(c.ratio ?? 0),
+      // RUIL: nieuwe effecten per oud stuk (ratio) of in totaal ontvangen (quantity, bv. uit een import);
+      // value = waarde per nieuw stuk op de ruildatum (in `currency`), om de aanschaffingswaarde te verdelen
+      components: (t.components || []).map(c => ({ asset: String(c.asset ?? "").trim(),
+        ratio: c.ratio != null && c.ratio !== "" ? D(c.ratio) : ZERO,
+        quantity: c.quantity != null && c.quantity !== "" ? D(c.quantity) : null,
         value: c.value != null && c.value !== "" ? D(c.value) : null })),
     };
   }
@@ -700,6 +727,25 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
   /** transactions: array (plain objects), refValues: {asset: "80.00"}, withheld: {"owner|year": "360"} */
   function calculate(transactions, refValues, cfg, withheld = {}, throughYear = null) {
     cfg = cfg || defaultConfig();
+    const { sales, dividends, events } = run(transactions, refValues, cfg);
+    const years = summarize(sales, dividends, cfg, withheld, throughYear);
+    const warnings = sales.flatMap(s => s.warnings.map(w => `${s.trade_date} ${s.asset}: ${w}`))
+      .concat(events.filter(e => e.kind !== "UITKOOP" && e.kind !== "RUIL").map(e => `${e.trade_date} ${e.asset}: ${e.note}`))
+      .concat(events.filter(e => e.warning).map(e => `${e.trade_date} ${e.asset}: ${e.warning}`));
+    return { sales, years, warnings, events,
+             disclaimer: "Deze berekening is een hulpmiddel en geen fiscaal advies. Controleer altijd met de officiële bronnen (FOD Financiën) of een adviseur." };
+  }
+
+  /** Loten (FIFO-pools) na alle transacties t.e.m. `date`, zoals de rekenkern ze opbouwt; enkel loten met stuks.
+   *  Voor weergave (bv. het gevolg van een omruiling); rekent niets bij. */
+  function lotsAt(transactions, refValues, cfg, date) {
+    const { pools } = run(transactions.filter(t => t.trade_date <= date), refValues || {}, cfg || defaultConfig());
+    return [...pools.values()].flat().filter(l => l.quantity.gt(ZERO))
+      .map(l => ({ owner: l.owner, broker: l.broker, asset: l.asset, acquired: l.acquired, quantity: l.quantity,
+                   unit_cost_eur: l.costKnown ? l.unitCost : null, historic_proven: l.historicProven }));
+  }
+
+  function run(transactions, refValues, cfg) {
     const txs = transactions.map((t, i) => ({ ...tx(t), _i: i }))
       .sort((a, b) => a.trade_date < b.trade_date ? -1 : a.trade_date > b.trade_date ? 1 : a._i - b._i);
     const pools = new Map(), sales = [], dividends = new Map(), events = [];
@@ -738,12 +784,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
         dividends.set(k, (dividends.get(k) || ZERO).add(toEur(t, t.amount)));
       }
     }
-    const years = summarize(sales, dividends, cfg, withheld, throughYear);
-    const warnings = sales.flatMap(s => s.warnings.map(w => `${s.trade_date} ${s.asset}: ${w}`))
-      .concat(events.filter(e => e.kind !== "UITKOOP" && e.kind !== "RUIL").map(e => `${e.trade_date} ${e.asset}: ${e.note}`))
-      .concat(events.filter(e => e.warning).map(e => `${e.trade_date} ${e.asset}: ${e.warning}`));
-    return { sales, years, warnings, events,
-             disclaimer: "Deze berekening is een hulpmiddel en geen fiscaal advies. Controleer altijd met de officiële bronnen (FOD Financiën) of een adviseur." };
+    return { pools, sales, dividends, events };
   }
 
   const DELIST_NOTES = {
@@ -782,11 +823,11 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
   // ------------------------------------------------------------ omruiling (fusie, overname met ruil in aandelen)
   /** Gewichten voor de verdeling van de aanschaffingswaarde over de nieuwe effecten en de cash (opleg), volgens hun
    *  waarde op de ruildatum. Eén nieuw effect zonder cash: alles gaat over. Anders zijn alle waarden nodig; zonder → null. */
-  function exchangeWeights(t) {
+  function exchangeWeights(t, ratioOf) {
     const comps = t.components, cash = t.price;
     if (comps.length === 1 && cash.isZero()) return { comps: [ONE], cash: ZERO };
     if (comps.some(c => !c.value)) return null;
-    const parts = comps.map(c => c.ratio.mul(c.value)), total = sum(parts).add(cash);
+    const parts = comps.map(c => ratioOf(c).mul(c.value)), total = sum(parts).add(cash);
     if (!total.gt(ZERO)) return null;
     return { comps: parts.map(x => x.div(total)), cash: cash.div(total) };
   }
@@ -797,13 +838,11 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     for (const c of comps) {
       if (!c.asset) throw new Error(`Omruiling: naam van het nieuwe effect ontbreekt (${t.source})`);
       if (c.asset === t.asset) throw new Error(`Omruiling: het nieuwe effect moet verschillen van ${t.asset} (${t.source})`);
-      if (!c.ratio.gt(ZERO)) throw new Error(`Omruiling: ratio voor ${c.asset} moet groter dan 0 zijn (${t.source})`);
+      if (!(c.quantity ? c.quantity : c.ratio).gt(ZERO)) throw new Error(`Omruiling: ratio voor ${c.asset} moet groter dan 0 zijn (${t.source})`);
       if (c.value && c.value.lt(ZERO)) throw new Error(`Omruiling: waarde van ${c.asset} mag niet negatief zijn (${t.source})`);
     }
     if (t.price.lt(ZERO)) throw new Error(`Omruiling: cash per stuk mag niet negatief zijn (${t.source})`);
-    const late = t.trade_date >= START, w = exchangeWeights(t);
-    if (!w && late) throw new Error(`Omruiling van ${t.asset} op ${t.trade_date}: vul voor elk nieuw effect de waarde per stuk ` +
-      `op de ruildatum in (nodig om de aanschaffingswaarde te verdelen over de nieuwe effecten en de cash).`);
+    const late = t.trade_date >= START;
     const held = sum(p.map(l => l.quantity));
     const qty = t.quantity.gt(ZERO) ? Dec.min(t.quantity, held) : held;
     const event = { trade_date: t.trade_date, owner: t.owner, broker: t.broker, asset: t.asset, kind: "RUIL",
@@ -814,6 +853,10 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
       event.warning = event.note;
       return nextId;
     }
+    const ratioOf = c => c.quantity ? c.quantity.div(qty) : c.ratio;  // nieuwe stuks per oud stuk
+    const w = exchangeWeights(t, ratioOf);
+    if (!w && late) throw new Error(`Omruiling van ${t.asset} op ${t.trade_date}: vul voor elk nieuw effect de waarde per stuk ` +
+      `op de ruildatum in (nodig om de aanschaffingswaarde te verdelen over de nieuwe effecten en de cash).`);
     // FIFO de omgeruilde stuks nemen (de loten blijven in de pool, zoals bij een verkoop)
     const parts = [];
     let remaining = qty;
@@ -828,21 +871,24 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
         throw new Error(`Geen waarde op 31/12/2025 voor ${t.asset} (nodig voor de omruiling op ${t.trade_date} van het lot van ${lot.acquired}).`);
     // nieuwe loten: zelfde verwervingsdatum, aanschaffingswaarde verdeeld volgens de waarde op de ruildatum
     comps.forEach((c, i) => {
-      const f = w ? w.comps[i] : null;
+      const f = w ? w.comps[i] : null, r = ratioOf(c);
       const target = pool(poolKey({ owner: t.owner, broker: t.broker, asset: c.asset }, cfg.fifoScope));
-      for (const { lot, q } of parts) {
-        const n = q.mul(c.ratio);
+      let given = ZERO;
+      parts.forEach(({ lot, q }, j) => {
+        // totaal ontvangen aantal: evenredig over de loten, het laatste lot krijgt de rest (som exact)
+        const n = !c.quantity ? q.mul(c.ratio) : j === parts.length - 1 ? c.quantity.sub(given) : c.quantity.mul(q).div(qty);
+        given = given.add(n);
         let unitRef = null;
         if (isPre(lot)) {
           if (!late) { if (refValues[c.asset] != null && refValues[c.asset] !== "") unitRef = D(refValues[c.asset]); }
-          else unitRef = lot.unitRef.mul(f).div(c.ratio);
+          else unitRef = lot.unitRef.mul(f).div(r);
         }
         target.push({ lotId: nextId++, owner: lot.owner, broker: lot.broker, asset: c.asset, acquired: lot.acquired,
-                      quantity: n, origQuantity: n, unitCost: f ? lot.unitCost.mul(f).div(c.ratio) : ZERO,
+                      quantity: n, origQuantity: n, unitCost: f ? lot.unitCost.mul(f).div(r) : ZERO,
                       historicProven: lot.historicProven, costKnown: lot.costKnown && !!f, unitRef, source: t.source });
-      }
+      });
     });
-    const per = comps.map(c => `${c.ratio} ${c.asset}`).join(" + ") + (t.price.gt(ZERO) ? ` + ${t.price} ${t.currency} cash` : "");
+    const per = comps.map(c => c.quantity ? `${c.asset} (${c.quantity} st. in totaal)` : `${c.ratio} ${c.asset}`).join(" + ") + (t.price.gt(ZERO) ? ` + ${t.price} ${t.currency} cash` : "");
     if (!late) {
       event.note = `Omruiling vóór 2026 (${per} per stuk): geen belastbaar moment. Voor de nieuwe effecten geldt hun waarde op ` +
         `31/12/2025; de aankoopdatum en -prijs van ${t.asset} gaan over op de nieuwe effecten` +
@@ -937,11 +983,11 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
       else if (t.type === "SELL" || (t.type === "DELISTING" && t.delist_mode === "UITKOOP") || t.type === "RUIL") {
         const held = sum(p.map(l => l.quantity));
         let q = t.quantity.gt(ZERO) ? Dec.min(t.quantity, held) : held;
-        if (t.type === "RUIL") for (const c of t.components) {
-          if (!c.asset || c.asset === t.asset || !c.ratio.gt(ZERO)) continue;
+        if (t.type === "RUIL" && q.gt(ZERO)) for (const c of t.components) {
+          if (!c.asset || c.asset === t.asset || !(c.quantity ? c.quantity : c.ratio).gt(ZERO)) continue;
           const k2 = poolKey({ ...t, asset: c.asset }, cfg.fifoScope);
           if (!pools.has(k2)) pools.set(k2, { owner: t.owner, asset: c.asset, lots: [] });
-          pools.get(k2).lots.push({ quantity: q.mul(c.ratio) });
+          pools.get(k2).lots.push({ quantity: c.quantity ? c.quantity : q.mul(c.ratio) });
         }
         for (const l of p) { if (!q.gt(ZERO)) break; const u = Dec.min(q, l.quantity); l.quantity = l.quantity.sub(u); q = q.sub(u); }
       }
@@ -977,7 +1023,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     return res;
   }
 
-  const api = { Dec, D, ZERO, ONE, money, TxType, DelistModes, ACQ, defaultConfig, calculate, compareMethods, holdingsAt, refValueFromCurrency, refValueFromEurRate };
+  const api = { Dec, D, ZERO, ONE, money, TxType, DelistModes, ACQ, defaultConfig, calculate, compareMethods, holdingsAt, lotsAt, refValueFromCurrency, refValueFromEurRate };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.MWB = api;
 })(typeof window !== "undefined" ? window : globalThis);
 </script>
@@ -1300,6 +1346,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
     };
     const tradeKeys = new Map(); // nameKey -> asset id
     const storno = []; // te annuleren regels
+    const caLines = []; // "Inboeking corporate action": kandidaat-nieuwe effecten bij een omruiling
 
     for (const l of lines) {
       const src = `${fileName}:${l.n}`;
@@ -1364,9 +1411,11 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
           import_id: importId(l), import_source: src,
         };
         out.push(dv); lineOf.set(dv, l);
-      } else if (/^Inboeking corporate action/i.test(l.desc)) {
+      } else if ((m = /^Inboeking corporate action\s+(.+)$/i.exec(l.desc)) || /^Inboeking corporate action/i.test(l.desc)) {
         addCash("CA", l, { remark: "controleer de betrokken posities", warn: true });
-        warnings.push(`${src}: ${l.desc} – corporate action (bv. overname of omruiling) staat niet volledig in de export. Controleer de betrokken posities.`);
+        const warning = `${src}: ${l.desc} – corporate action (bv. overname of omruiling) staat niet volledig in de export. Controleer de betrokken posities.`;
+        warnings.push(warning);
+        if (m) caLines.push({ date: l.date, id: assetName(m[1]).id, qty, price, cashId: cash[cash.length - 1].import_id, warning, src });
       } else {
         const s = SKIP.find(([re]) => re.test(l.desc));
         addCash(s ? s[1] : "ANDERE", l, s ? {} : { remark: "onbekend type", warn: true });
@@ -1427,13 +1476,111 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
       if (!h || h.quantity.lt(t.quantity)) short.push(t.asset);
     }
     const period = lines.length ? [lines[0].date, lines[lines.length - 1].date] : [null, null];
-    if (short.length)
-      warnings.unshift(`De export loopt van ${period[0]} tot ${period[1]} en bevat niet alle aankopen voor: ${[...new Set(short)].join(", ")}. ` +
-        "Importeer ook een export vanaf je eerste aankoop (of voeg de aankopen zelf toe), anders kan de meerwaarde niet berekend worden.");
-    return { transactions, cash, skipped, warnings, refHints, assets, positions, fileName, rows: lines.length, period, incomplete: [...new Set(short)] };
+    if (short.length) warnings.unshift(shortWarning(period, [...new Set(short)]));
+    const qtyOf = t => { const l = lineOf.get(t); return l ? bnum(l.r[C.qty]) : null; };
+    const descOf = t => lineOf.get(t)?.desc || "";
+    const exchanges = detectExchanges({ transactions, positions, caLines, incomplete: [...new Set(short)], qtyOf, descOf, fileName });
+    return { transactions, cash, skipped, warnings, refHints, assets, positions, fileName, rows: lines.length, period,
+             incomplete: [...new Set(short)], exchanges };
   }
 
-  const api = { parseBolero, parseBoleroRows, parseBoleroSheets, rowsFromSheet, beNum, duplicateFlags, contentKey, parseCsv, assetName, nameKey };
+  /** Waarschuwing voor verkopen zonder (voldoende) aankopen in de export. */
+  function shortWarning(period, assets) {
+    return `De export loopt van ${period[0]} tot ${period[1]} en bevat niet alle aankopen voor: ${assets.join(", ")}. ` +
+      "Importeer ook een export vanaf je eerste aankoop (of voeg de aankopen zelf toe), anders kan de meerwaarde niet berekend worden.";
+  }
+
+  // ------------------------------------------------------------ omruilingen (fusie/overname) herkennen
+  const dayOf = d => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)) / 864e5;
+  const sameName = (a, b) => { const x = nameKey(a), y = nameKey(b); return x.length >= 4 && y.length >= 4 && (x.startsWith(y) || y.startsWith(x)); };
+  const NEAR = 7;      // dagen rond de laatste regel van het oude effect (inboeking, cash)
+  const LATER = 183;   // nieuwe effecten zonder aankoop: eerste regel uiterlijk een half jaar later
+
+  /**
+   * Voorstellen voor omruilingen: een effect dat volgens de export nog in bezit is maar na een datum niet meer
+   * voorkomt, met rond die datum (a) een "Inboeking corporate action" van een ander effect en/of (b) effecten die
+   * daarna verkocht worden zonder aankoop in de export, en eventueel (c) een betaling voor exact het aantal stuks
+   * in bezit (de cash; Bolero boekt die als dividend). De export zelf legt geen verband: het blijft een voorstel
+   * dat de gebruiker bevestigt. -> [{ asset, date, quantity, components, cash, reasons, resolves, import_id }]
+   */
+  function detectExchanges({ transactions, positions, caLines, incomplete, qtyOf, descOf, fileName }) {
+    const of = name => transactions.filter(t => sameName(t.asset, name));
+    // effecten zonder (voldoende) aankopen: ontvangen aantal = grootste tekort, eerste regel
+    const orphans = incomplete.map(asset => {
+      const own = transactions.filter(t => t.asset === asset).sort((a, b) => a.trade_date < b.trade_date ? -1 : a.trade_date > b.trade_date ? 1 : 0);
+      let bal = ZERO, min = ZERO;
+      for (const t of own) {
+        if (t.type === "BUY") bal = bal.add(D(t.quantity));
+        else if (t.type === "SELL") { bal = bal.sub(D(t.quantity)); if (bal.lt(min)) min = bal; }
+      }
+      const first = of(asset).map(t => t.trade_date).sort()[0];
+      return { asset, qty: min.neg(), first, sells: own.filter(t => t.type === "SELL") };
+    }).filter(o => o.qty.gt(ZERO));
+    const cands = positions.filter(p => p.suspicious).map(p => {
+      const own = of(p.asset);
+      return { p, own, last: own.map(t => t.trade_date).sort().pop() };
+    }).filter(c => c.last);
+    // elk effect zonder aankoop hoort bij het oude effect met de laatste datum ervoor (binnen het venster)
+    const owner = new Map();
+    for (const o of orphans) {
+      const best = cands.filter(c => dayOf(o.first) >= dayOf(c.last) - NEAR && dayOf(o.first) <= dayOf(c.last) + LATER)
+        .sort((a, b) => dayOf(b.last) - dayOf(a.last))[0];
+      if (best) owner.set(o, best);
+    }
+    const out = [];
+    for (const c of cands) {
+      const near = d => Math.abs(dayOf(d) - dayOf(c.last)) <= NEAR;
+      const comps = [], reasons = [`${c.p.asset} komt na ${c.last} niet meer voor in de export`];
+      const resolvesWarnings = [], resolvesCash = [];
+      for (const ca of caLines.filter(x => near(x.date) && !sameName(x.id, c.p.asset))) {
+        const orphan = orphans.find(o => sameName(o.asset, ca.id));
+        const asset = orphan ? orphan.asset : ca.id;
+        if (comps.some(k => k.asset === asset)) continue;
+        comps.push({ asset, quantity: ca.qty && ca.qty.gt(ZERO) ? ca.qty.toString() : orphan ? orphan.qty.toString() : "",
+          value: ca.price && ca.price.gt(ZERO) ? ca.price.toString() : "",
+          value_note: ca.price && ca.price.gt(ZERO) ? "koers uit de inboekingsregel; de export vermeldt de munt niet: controleer" : "",
+          via: `Inboeking corporate action ${ca.date} (${ca.qty ?? "?"} st.${ca.price ? ` @ ${ca.price}` : ""})` +
+            (orphan ? `; verkocht zonder aankoop in de export` : "") });
+        resolvesWarnings.push(ca.warning); resolvesCash.push(ca.cashId);
+        if (!reasons.some(r => r.includes("inboeking"))) reasons.push(`op ${ca.date} een inboeking van een nieuw effect`);
+      }
+      for (const [o, best] of owner) {
+        if (best !== c || comps.some(k => k.asset === o.asset || sameName(k.asset, o.asset))) continue;
+        const s = o.sells[0];
+        comps.push({ asset: o.asset, quantity: o.qty.toString(), value: "", value_note: "",
+          via: `Verkocht ${s ? s.trade_date : "later"} zonder aankoop in de export (${o.qty} st.)` });
+        if (!reasons.some(r => r.startsWith("effecten die later"))) reasons.push("effecten die later verkocht worden zonder aankoop");
+      }
+      if (!comps.length) continue;
+      // cash: betaling voor exact het aantal stuks in bezit rond die datum (Bolero: "Uitbetaling dividenden")
+      let cash = null;
+      const divs = c.own.filter(t => t.type === "DIVIDEND");
+      const hit = divs.filter(t => near(t.trade_date) && qtyOf(t) && qtyOf(t).eq(c.p.quantity)).pop();
+      if (hit) {
+        const per = D(hit.amount).div(D(c.p.quantity));
+        const earlier = divs.filter(t => t !== hit && t.trade_date < hit.trade_date && qtyOf(t) && qtyOf(t).gt(ZERO))
+          .map(t => D(t.amount).div(qtyOf(t))).sort((a, b) => a.cmp(b));
+        const median = earlier.length ? earlier[Math.floor(earlier.length / 2)] : null;
+        const unusual = !median || per.gte(median.mul(5));
+        cash = { import_id: hit.import_id, amount: hit.amount, currency: hit.currency, fx_per_eur: hit.fx_per_eur,
+                 eur_per_ccy: hit.eur_per_ccy ?? null, per_share: per.round(10).toString(), date: hit.trade_date,
+                 description: descOf(hit), source: hit.import_source, checked: unusual,
+                 hint: unusual ? "veel hoger dan de gewone dividenden: waarschijnlijk de cash van de overname"
+                   : "in de lijn van de gewone dividenden: enkel aanvinken als het de cash van de overname is" };
+        reasons.push(`een betaling voor exact ${c.p.quantity} stuks op ${hit.trade_date}`);
+      }
+      const firsts = comps.map(k => (orphans.find(o => o.asset === k.asset) || {}).first).filter(Boolean);
+      const caDate = caLines.filter(x => near(x.date) && comps.some(k => sameName(k.asset, x.id))).map(x => x.date).sort()[0];
+      const date = [caDate || c.last, ...firsts].sort()[0];
+      out.push({ asset: c.p.asset, date, quantity: c.p.quantity, components: comps, cash, reasons,
+                 resolves: { warnings: resolvesWarnings, cash: resolvesCash, assets: comps.map(k => k.asset) },
+                 import_id: "b:ruil:" + fnv64(`${c.p.asset}|${date}`), source: fileName });
+    }
+    return out;
+  }
+
+  const api = { parseBolero, parseBoleroRows, parseBoleroSheets, rowsFromSheet, beNum, duplicateFlags, contentKey, parseCsv, assetName, nameKey,
+                shortWarning, sameName };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.BOLERO = api;
 })(typeof window !== "undefined" ? window : globalThis);
 </script>
@@ -2605,14 +2752,16 @@ function validateTx(p) {
   else if (p.type === "RUIL") {
     out.quantity = dec(p.quantity, "aantal oude stuks", { positive: true }) ?? "0";
     out.price = dec(p.price, "cash per oud stuk", { nonNegative: true }) ?? "0";
-    const comps = (p.components || []).filter(c => [c.asset, c.ratio, c.value].some(v => String(v ?? "").trim() !== ""));
+    const comps = (p.components || []).filter(c => [c.asset, c.ratio, c.quantity, c.value].some(v => String(v ?? "").trim() !== ""));
     if (!comps.length) throw new InputError("Vul minstens één nieuw effect in (naam en aantal per oud stuk).");
     out.components = comps.map(c => {
       const a = String(c.asset || "").trim().toUpperCase();
       if (!a) throw new InputError("Naam van het nieuwe effect ontbreekt.");
       if (a === asset) throw new InputError("Het nieuwe effect moet verschillen van het oude.");
-      return { asset: a, ratio: dec(c.ratio, `aantal ${a} per oud stuk`, { required: true, positive: true }),
-               value: dec(c.value, `waarde per stuk ${a}`, { nonNegative: true }) };
+      const value = dec(c.value, `waarde per stuk ${a}`, { nonNegative: true });
+      // totaal ontvangen (bv. uit een import) of aantal per oud stuk
+      if (hasVal(c.quantity)) return { asset: a, quantity: dec(c.quantity, `ontvangen stuks ${a}`, { required: true, positive: true }), value };
+      return { asset: a, ratio: dec(c.ratio, `aantal ${a} per oud stuk`, { required: true, positive: true }), value };
     });
     if (new Set(out.components.map(c => c.asset)).size < out.components.length) throw new InputError("Elk nieuw effect maar één keer invullen.");
     if ((out.components.length > 1 || D(out.price).gt(0)) && out.components.some(c => c.value == null) && p.trade_date >= "2026-01-01")
@@ -3119,7 +3268,7 @@ function txRow(t, hasProof, missing) {
     const amt = t.type === "DIVIDEND" || t.type === "FEE";
     const value = t.type === "SPLIT" ? `${num(t.split_ratio)} : 1` : amt ? num(t.amount)
       : t.type === "DELISTING" ? (t.delist_mode === "UITKOOP" ? num(t.price) : "")
-      : t.type === "RUIL" ? `<span class="small">→ ${(t.components || []).map(c => `${num(c.ratio)} ${esc(c.asset)}`).join(" + ")}${D(t.price || 0).gt(0) ? ` + ${num(t.price)} cash` : ""}</span>`
+      : t.type === "RUIL" ? `<span class="small">→ ${(t.components || []).map(c => hasVal(c.quantity) ? `${num(c.quantity)} st. ${esc(c.asset)}` : `${num(c.ratio)} ${esc(c.asset)}`).join(" + ")}${D(t.price || 0).gt(0) ? ` + ${num(t.price)} cash` : ""}</span>`
       : num(t.price);
     return `<tr data-id="${t.id}" class="clickable" title="Tik om te bewerken">
       <td>${esc(t.trade_date)}</td>
@@ -3199,13 +3348,14 @@ function addRuilRow(c = {}) {
   const row = document.createElement("div");
   row.className = "ruil-row";
   row.innerHTML = `<label>Nieuw effect (naam) <input name="c_asset" autocomplete="off" autocapitalize="characters" list="asset-list" value="${esc(c.asset)}"></label>
-    <label>Aantal per oud stuk <input name="c_ratio" inputmode="decimal" placeholder="bv. 0,1598" value="${esc(c.ratio)}"></label>
+    ${hasVal(c.quantity) ? `<label>Totaal ontvangen (st.) <input name="c_quantity" inputmode="decimal" value="${esc(c.quantity)}"></label>`
+      : `<label>Aantal per oud stuk <input name="c_ratio" inputmode="decimal" placeholder="bv. 0,1598" value="${esc(c.ratio)}"></label>`}
     <label>Waarde per stuk op ruildatum <input name="c_value" inputmode="decimal" value="${esc(c.value)}"></label>
     <button type="button" class="btn small danger" data-ruil-del aria-label="Verwijder dit effect">✕</button>`;
   $("#ruil-rows").append(row);
 }
 const readRuilRows = () => $$(".ruil-row", form).map(r => ({ asset: $("[name=c_asset]", r).value.trim(),
-  ratio: $("[name=c_ratio]", r).value.trim(), value: $("[name=c_value]", r).value.trim() }));
+  ratio: $("[name=c_ratio]", r)?.value.trim() ?? "", quantity: $("[name=c_quantity]", r)?.value.trim() ?? "", value: $("[name=c_value]", r).value.trim() }));
 $("#ruil-add").addEventListener("click", () => addRuilRow());
 $("#ruil-rows").addEventListener("click", e => {
   const b = e.target.closest("[data-ruil-del]");
@@ -3842,7 +3992,7 @@ function openImportDialog(r) {
     <td>${esc(d.date)}</td><td class="num">${num(d.quantity)}</td>
     <td><select name="mode">${Object.entries(DELIST_LABELS).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("")}</select></td>
     <td><input name="price" inputmode="decimal" class="num" placeholder="EUR per stuk" disabled aria-label="Uitkoopprijs"></td></tr>`).join("");
-  const dupFlags = window.BOLERO.duplicateFlags(state.transactions, r.transactions);
+  const dupFlags = importDupFlags(r);
   const fresh = r.transactions.filter((t, i) => !dupFlags[i]);
   const cnt = type => fresh.filter(t => t.type === type).length;
   const dup = r.transactions.length - fresh.length;
@@ -3863,6 +4013,7 @@ function openImportDialog(r) {
   $("#imp-skipped").innerHTML = Object.entries(r.skipped).map(([k, v]) => `<li>${esc(k)}: ${v}</li>`).join("");
   $("#imp-skipped-wrap").hidden = !Object.keys(r.skipped).length;
   $("#imp-owner").value = DEFAULT_OWNER;
+  r.exch = exchangeProposals(r);
   $("#imp-positions tbody").innerHTML = r.positions.map((p, i) => {
     const oldKey = [...(r.keyMoves || [])].find(([, to]) => to === p.asset)?.[0];
     const known = [state.assets[p.asset], oldKey && state.assets[oldKey]].find(a => a && hasVal(a.ref_value_eur));
@@ -3870,20 +4021,153 @@ function openImportDialog(r) {
     const ccy = String(r.assets?.[p.asset]?.currency || state.assets[p.asset]?.currency || "EUR").toUpperCase();
     const val = known ? refFields(known) : { ref_value_eur: p.refHint?.value ?? "" };
     return `<tr data-i="${i}" class="${p.suspicious ? "suspicious" : ""}">
-      <td><input type="checkbox" name="keep" ${p.suspicious ? "" : "checked"} aria-label="Nog in bezit"></td>
-      <td><strong>${esc(p.asset)}</strong>${p.name ? `<br><span class="small muted">${esc(p.name)}</span>` : ""}${p.suspicious ? `<br><span class="small neg">waarschijnlijk niet meer in bezit (overname, splitsing of naamswijziging?)</span>` : ""}</td>
+      <td><input type="checkbox" name="keep" ${p.suspicious || exchangedBefore(p.asset) ? "" : "checked"} ${exchangedBefore(p.asset) ? "disabled" : ""} aria-label="Nog in bezit"></td>
+      <td><strong>${esc(p.asset)}</strong>${p.name ? `<br><span class="small muted">${esc(p.name)}</span>` : ""}<span class="exch-state small"></span>${exchangedBefore(p.asset)
+        ? `<br><span class="small pos">al omgeruild (eerder bevestigd): wordt niet uitgeboekt</span>`
+        : p.suspicious && !r.exch.some(e => e.x.asset === p.asset) ? `<br><span class="small neg">waarschijnlijk niet meer in bezit (overname, splitsing of naamswijziging?)</span>` : ""}</td>
       <td class="num">${num(p.quantity)}</td>
       <td class="col-div">${esc(p.lastDividend || "–")}</td>
       <td>${refInputs(ccy, val, ccy === "EUR" ? "slotkoers in EUR" : "")}
         <span class="hint need-hint" hidden></span>
         ${p.refHint && cur == null ? `<span class="hint">${esc(p.refHint.from)}</span>` : ""}</td></tr>`;
   }).join("") || `<tr><td colspan="5" class="muted">Geen posities op 31/12/2025 volgens deze export.</td></tr>`;
-  $("#imp-warnings").innerHTML = r.warnings.map(w => `<li>${esc(w)}</li>`).join("");
-  $("#imp-warn-wrap").hidden = !r.warnings.length;
-  $("#imp-warn-count").textContent = r.warnings.length;
+  renderExchanges();
   $("#import-dialog").showModal();
   markNeededRefs();
 }
+
+// ---------------------------------------------------------------- omruilingen bij import (voorstel, bevestigen)
+/** Omruilingen die al bevestigd zijn (in de tool), per oud effect. */
+const exchangedBefore = asset => state.transactions.some(t => t.type === "RUIL" && t.asset === asset);
+/** Dubbels zoals voorheen, plus de 'dividenden' die bij een eerder bevestigde omruiling als cash verwerkt zijn. */
+function importDupFlags(r) {
+  const flags = window.BOLERO.duplicateFlags(state.transactions, r.transactions);
+  const ids = new Set(), keys = new Set();
+  for (const t of state.transactions) if (t.type === "RUIL") { if (t.cash_import_id) ids.add(t.cash_import_id); if (t.cash_content_key) keys.add(t.cash_content_key); }
+  return r.transactions.map((t, i) => flags[i] || ids.has(t.import_id) || (t.type === "DIVIDEND" && keys.has(window.BOLERO.contentKey(t))));
+}
+function exchangeProposals(r) {
+  return (r.exchanges || []).filter(x => !exchangedBefore(x.asset) && !state.transactions.some(t => t.import_id === x.import_id))
+    .map(x => ({ x, accept: true, cashOn: !!x.cash?.checked, comps: x.components.map(c => ({ ...c, on: true })) }));
+}
+const exchAccepted = e => e.accept && e.comps.some(c => c.on && c.asset.trim() && hasVal(c.quantity));
+/** Transactie 'Omruiling' uit een voorstel (gooit InputError bij ongeldige invoer). */
+function exchangeTx(e, owner) {
+  const comps = e.comps.filter(c => c.on && (c.asset.trim() || hasVal(c.quantity)));
+  if (!comps.length) throw new InputError(`Omruiling ${e.x.asset}: kies minstens één nieuw effect.`);
+  const cash = e.cashOn ? e.x.cash : null;
+  const raw = { type: "RUIL", trade_date: e.x.date, asset: e.x.asset, owner, broker: "Bolero", quantity: "", price: cash ? cash.per_share : "0",
+    currency: cash ? cash.currency : "EUR", fx_per_eur: cash ? cash.fx_per_eur : "1", eur_per_ccy: cash ? cash.eur_per_ccy : null,
+    components: comps.map(c => ({ asset: c.asset, quantity: c.quantity, value: c.value })) };
+  return { ...validateTx(raw), import_id: e.x.import_id, import_source: e.x.source,
+    cash_import_id: cash ? cash.import_id : null, cash_content_key: cash ? window.BOLERO.contentKey(pendingDividend(cash.import_id)) : null,
+    note: "Omruiling volgens de Bolero-export (voorstel bevestigd bij import)" };
+}
+const pendingDividend = id => (pendingImport?.transactions || []).find(t => t.import_id === id) || {};
+function renderExchanges() {
+  const r = pendingImport; if (!r) return;
+  $("#imp-exch-wrap").hidden = !r.exch.length;
+  $("#exch-assets").innerHTML = [...new Set([...(r.incomplete || []), ...Object.keys(state.assets)])].map(a => `<option value="${esc(a)}">`).join("");
+  $("#imp-exch").innerHTML = r.exch.map((e, i) => `<div class="exch" data-x="${i}">
+    <h4>Voorstel: ${esc(e.x.asset)} omgeruild op ${esc(e.x.date)}</h4>
+    <p class="why">Waarom: ${e.x.reasons.map(esc).join(" · ")}.</p>
+    <div class="comps">${e.comps.map((c, j) => exchCompHtml(e, c, j)).join("")}</div>
+    <p style="margin:.45rem 0 0"><button type="button" class="btn small ghost" data-exch-add>+ Ander effect toevoegen</button></p>
+    ${e.x.cash ? `<div class="exch-box"><label class="check" style="margin:0"><input type="checkbox" data-exch-cash ${e.cashOn ? "checked" : ""}>
+      <span><strong>Cash bij omruiling:</strong> ${esc(e.x.cash.currency)} ${num(e.x.cash.amount)} op ${esc(e.x.cash.date)} voor ${num(e.x.quantity)} stuks
+      (${num(D(e.x.cash.per_share).toString())} per oud stuk).<span class="why"><br>In de export als "${esc(e.x.cash.description)}"; ${esc(e.x.cash.hint)}.
+      Aangevinkt: telt niet als dividend, maar als cash van de overname.</span></span></label></div>` : ""}
+    <div class="exch-cols"><div><strong class="small">Wordt toegevoegd</strong><div class="exch-tx"></div></div>
+      <div><strong class="small">Gevolg voor je loten</strong><div class="exch-lots"></div></div></div>
+    <label class="check" style="margin-top:.6rem"><input type="checkbox" data-exch-accept ${e.accept ? "checked" : ""}> <strong>Omruiling toevoegen bij import</strong></label>
+  </div>`).join("");
+  updateExchanges();
+}
+function exchCompHtml(e, c, j) {
+  const ratio = hasVal(c.quantity) && !D(e.x.quantity).isZero() ? (() => { try { return num(D(c.quantity).div(D(e.x.quantity)).round(6).toString()); } catch { return "–"; } })() : "–";
+  return `<div class="exch-comp" data-c="${j}">
+    <input type="checkbox" data-k="on" ${c.on ? "checked" : ""} aria-label="Meenemen">
+    <div><span class="lbl">Nieuw effect</span>${c.manual ? `<input data-k="asset" value="${esc(c.asset)}" list="exch-assets" placeholder="naam" aria-label="Nieuw effect">` : `<strong>${esc(c.asset)}</strong>`}</div>
+    <div><span class="lbl">Ontvangen · per oud stuk</span>${c.manual ? `<input data-k="quantity" value="${esc(c.quantity)}" inputmode="decimal" aria-label="Ontvangen stuks" style="width:5.5rem">`
+      : `<strong>${num(c.quantity)}</strong>`} st. · <span class="ratio">${ratio}</span></div>
+    <div class="val"><span class="lbl">Waarde per stuk op ruildatum</span><input data-k="value" value="${esc(c.value)}" inputmode="decimal" placeholder="leeg = niet verdelen" aria-label="Waarde per stuk">
+      ${c.value_note ? `<span class="hint">${esc(c.value_note)}</span>` : ""}</div>
+    <div class="via">Gevonden via: ${esc(c.via)}</div></div>`;
+}
+/** Voorbeeld (transactie en loten), status in de positietabel en de aandachtspunten bijwerken. */
+function updateExchanges() {
+  const r = pendingImport; if (!r) return;
+  const owner = $("#imp-owner").value.trim() || DEFAULT_OWNER;
+  const dups = r.exch.length ? importDupFlags(r) : [];
+  r.exch.forEach((e, i) => {
+    const box = $(`.exch[data-x="${i}"]`); if (!box) return;
+    box.classList.toggle("off", !e.accept);
+    let html, lots = "";
+    try {
+      const t = exchangeTx(e, owner);
+      html = `<div class="alert ok"><strong>Omruiling (fusie/overname)</strong> · ${esc(t.trade_date)}<br>${esc(t.asset)} → ` +
+        t.components.map(c => `${num(c.quantity)} ${esc(c.asset)}`).join(" + ") + (D(t.price).gt(0) ? ` + ${esc(t.currency)} ${num(D(t.price).round(6).toString())} cash per stuk` : "") +
+        `<br><span class="small">Volledige positie (${num(e.x.quantity)} st.).${t.trade_date < "2026-01-01" ? " Geen belastbaar moment (vóór 2026)." : " Vanaf 2026: de cash telt als verkoop."}</span></div>`;
+      const fresh = r.transactions.filter((x, k) => !dups[k] && !(e.cashOn && x.import_id === t.cash_import_id));
+      const all = [...state.transactions.filter(x => x.owner === owner), ...fresh.map(x => ({ ...x, owner }))].concat([{ ...t }]);
+      const cfg = { ...defaultConfig(), fifoScope: state.settings.fifo_scope };
+      const got = window.MWB.lotsAt(all, {}, cfg, t.trade_date).filter(l => t.components.some(c => c.asset === l.asset) && l.acquired <= t.trade_date);
+      const split = got.some(l => l.unit_cost_eur);
+      lots = got.length ? `<div class="table-wrap"><table><thead><tr><th>Effect</th><th>Aankoop</th><th class="num">Aantal</th><th class="num">Hist. prijs/st.</th></tr></thead><tbody>` +
+        got.map(l => `<tr><td>${esc(l.asset)}</td><td>${esc(l.acquired)}</td><td class="num">${num(l.quantity.round(6).toString())}</td>
+          <td class="num">${l.unit_cost_eur ? eur(l.unit_cost_eur.toFixed(2)) : `<span class="muted">niet verdeeld</span>`}</td></tr>`).join("") + `</tbody></table></div>` +
+        `<p class="hint">${split ? "De aankoopprijs is verdeeld volgens de waarde op de ruildatum (eigen interpretatie, te bevestigen)."
+          : "Zonder waarde per stuk voor elk nieuw effect wordt de aankoopprijs niet verdeeld: geen hogere historische prijs mogelijk."}</p>`
+        : `<p class="hint">Geen aankopen van ${esc(e.x.asset)} gevonden vóór de ruildatum.</p>`;
+    } catch (err) { html = `<div class="alert warn">${esc(err.message)}</div>`; }
+    $(".exch-tx", box).innerHTML = html; $(".exch-lots", box).innerHTML = lots;
+    const tr = [...$$("#imp-positions tbody tr[data-i]")].find(x => r.positions[Number(x.dataset.i)].asset === e.x.asset);
+    if (tr) {
+      const on = exchAccepted(e), keep = $("[name=keep]", tr);
+      keep.disabled = on; if (on) keep.checked = false;
+      $(".exch-state", tr).innerHTML = on ? `<br><span class="pos">omgeruild op ${esc(e.x.date)}: wordt uitgeboekt (zie voorstel hieronder)</span>`
+        : `<br><span class="neg">waarschijnlijk niet meer in bezit · mogelijk omgeruild (zie voorstel hieronder)</span>`;
+    }
+  });
+  // aandachtspunten: wat een bevestigde omruiling oplost, doorstrepen
+  const on = r.exch.filter(exchAccepted);
+  const done = new Set(on.flatMap(e => e.x.resolves.warnings));
+  const solved = new Set(on.flatMap(e => e.comps.filter(c => c.on).map(c => c.asset)));
+  const short = r.incomplete?.length ? window.BOLERO.shortWarning(r.period, r.incomplete) : null;
+  const left = (r.incomplete || []).filter(a => !solved.has(a));
+  const items = r.warnings.map(w => w === short && left.length < r.incomplete.length
+    ? (left.length ? { text: window.BOLERO.shortWarning(r.period, left), done: false } : { text: w, done: true })
+    : { text: w, done: done.has(w) });
+  for (const e of on) if (e.cashOn) items.push({ text: `${e.x.cash.date} ${e.x.asset}: betaling van ${e.x.cash.currency} ${num(e.x.cash.amount)} telt niet als dividend maar als cash van de omruiling.`, done: false, info: true });
+  $("#imp-warnings").innerHTML = items.map(w => `<li class="${w.done ? "done" : ""}">${esc(w.text)}${w.done ? ` <span class="badge ok">opgelost</span>` : ""}</li>`).join("");
+  $("#imp-warn-wrap").hidden = !items.length;
+  $("#imp-warn-count").textContent = items.filter(w => !w.done && !w.info).length + (items.some(w => w.done) ? ` open, ${items.filter(w => w.done).length} opgelost` : "");
+}
+$("#imp-exch").addEventListener("input", e => {
+  const box = e.target.closest(".exch[data-x]"); if (!box) return;
+  const x = pendingImport.exch[Number(box.dataset.x)], row = e.target.closest("[data-c]");
+  if (row && e.target.dataset.k && e.target.type !== "checkbox") {
+    const c = x.comps[Number(row.dataset.c)]; c[e.target.dataset.k] = e.target.value.trim();
+    if (e.target.dataset.k === "quantity") $(".ratio", row).textContent = (() => { try { return num(D(c.quantity).div(D(x.x.quantity)).round(6).toString()); } catch { return "–"; } })();
+  }
+  updateExchanges();
+});
+$("#imp-exch").addEventListener("change", e => {
+  const box = e.target.closest(".exch[data-x]"); if (!box) return;
+  const x = pendingImport.exch[Number(box.dataset.x)], row = e.target.closest("[data-c]");
+  if (row && e.target.dataset.k === "on") x.comps[Number(row.dataset.c)].on = e.target.checked;
+  if (e.target.matches("[data-exch-cash]")) x.cashOn = e.target.checked;
+  if (e.target.matches("[data-exch-accept]")) x.accept = e.target.checked;
+  updateExchanges();
+});
+$("#imp-exch").addEventListener("click", e => {
+  if (!e.target.closest("[data-exch-add]")) return;
+  const box = e.target.closest(".exch[data-x]"), x = pendingImport.exch[Number(box.dataset.x)];
+  x.comps.push({ asset: "", quantity: "", value: "", value_note: "", via: "zelf toegevoegd", manual: true, on: true });
+  $(".comps", box).insertAdjacentHTML("beforeend", exchCompHtml(x, x.comps[x.comps.length - 1], x.comps.length - 1));
+  updateExchanges();
+});
+$("#imp-owner").addEventListener("input", () => updateExchanges());
 $("#imp-delist").addEventListener("change", e => {
   const tr = e.target.closest("tr[data-d]"); if (!tr) return;
   const buyout = $("[name=mode]", tr).value === "UITKOOP";
@@ -3927,11 +4211,19 @@ $("#imp-confirm").addEventListener("click", () => {
       return { d, add: $("[name=add]", tr).checked, mode,
         price: mode === "UITKOOP" && $("[name=add]", tr).checked ? dec($("[name=price]", tr).value, `uitkoopprijs voor ${d.name}`, { required: true, nonNegative: true }) : null };
     });
+    const exch = (r.exch || []).filter(exchAccepted).map(e => ({ e, t: exchangeTx(e, owner) }));
     const moved = moveAssetKeys(r.keyMoves);
-    const dupFlags = window.BOLERO.duplicateFlags(state.transactions, r.transactions);
+    const dupFlags = importDupFlags(r);
+    const absorbed = new Set(exch.map(({ t }) => t.cash_import_id).filter(Boolean));
     let added = 0;
+    // omruilingen eerst: op dezelfde dag vóór de verkoop van een nieuw effect
+    for (const { t } of exch) {
+      state.transactions.push({ ...t, id: state.nextId++ });
+      for (const c of t.components) state.assets[c.asset] ??= { name: "", asset_type: "aandeel", currency: t.currency, ref_value_eur: null, ref_source: "" };
+      added++;
+    }
     for (const [i, t] of r.transactions.entries()) {
-      if (dupFlags[i]) continue;
+      if (dupFlags[i] || absorbed.has(t.import_id)) continue;
       state.transactions.push({ ...t, owner, id: state.nextId++ });
       added++;
     }
@@ -3952,7 +4244,15 @@ $("#imp-confirm").addEventListener("click", () => {
       added++;
     }
     let cashAdded = 0;
-    if ($("#imp-cash-add").checked) for (const c of GELD.fresh(state.cash, r.cash)) { state.cash.push({ ...c, owner, id: state.nextId++ }); cashAdded++; }
+    const doneCash = new Set(exch.flatMap(({ e }) => e.x.resolves.cash));
+    const extraCash = exch.filter(({ e }) => e.cashOn).map(({ e }) => ({ kind: "CA", date: e.x.cash.date, amount: e.x.cash.amount, currency: e.x.cash.currency,
+      asset_name: e.x.asset, description: e.x.cash.description, status: "verwerkt", remark: "cash bij omruiling (zie de transactie Omruiling)",
+      owner, broker: "Bolero", import_id: "c" + e.x.cash.import_id, import_source: e.x.cash.source }));
+    if ($("#imp-cash-add").checked) for (const c of GELD.fresh(state.cash, [...r.cash, ...extraCash])) {
+      const done = doneCash.has(c.import_id);
+      state.cash.push({ ...c, ...(done ? { status: "verwerkt", remark: "verwerkt in de omruiling", warn: undefined } : {}), owner, id: state.nextId++ });
+      cashAdded++;
+    }
     for (const t of r.transactions) if (t.type === "DIVIDEND")
       state.assets[t.asset] ??= { name: "", asset_type: "aandeel", currency: t.currency, ref_value_eur: null, ref_source: "" };
     for (const { p, keep, ref } of decisions) {
@@ -3962,7 +4262,7 @@ $("#imp-confirm").addEventListener("click", () => {
         Object.assign(a, ref);
       }
       const corrId = `corr:${owner}:${p.asset}`;
-      if (!keep && !state.transactions.some(t => t.import_id === corrId)) {
+      if (!keep && !exch.some(({ t }) => t.asset === p.asset) && !exchangedBefore(p.asset) && !state.transactions.some(t => t.import_id === corrId)) {
         state.transactions.push({ id: state.nextId++, type: "SELL", trade_date: "2025-12-31", asset: p.asset, quantity: p.quantity, price: "0",
           currency: "EUR", fx_per_eur: "1", fees: "0", taxes: "0", owner, broker: "Bolero", historic_proven: false, cost_known: true,
           reynders_eur: "0", amount: "0", split_ratio: null, import_id: corrId,

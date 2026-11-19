@@ -357,3 +357,33 @@ test("exchange notes match python", () => {
     "Voor de nieuwe effecten geldt hun waarde op 31/12/2025; de aankoopdatum en -prijs van OUD gaan over op de nieuwe effecten. " +
     "De aankoopprijs is niet verdeeld (waarde per nieuw stuk op de ruildatum niet ingevuld): geen hogere historische prijs mogelijk.");
 });
+
+const ruilQ = (d, a, comps, cash = 0, kw = {}) => ({ trade_date: d, type: "RUIL", asset: a, quantity: "0", price: String(cash),
+  components: comps.map(([asset, quantity, value]) => ({ asset, quantity: String(quantity), value: value == null ? null : String(value) })), ...kw });
+
+test("exchange total quantity splits cost by value", () => {
+  const txs = [buy("2020-01-10", "OUD", 40, 10, { historic_proven: true }), buy("2021-01-10", "OUD", 60, 10, { historic_proven: true }),
+    ruilQ("2023-03-31", "OUD", [["NA", 20, 25], ["NB", 30, 10]], 2), sell("2026-06-01", "NA", 20, 30)];
+  const rep = calculate(txs, { NA: "22" });
+  const s = rep.sales[0];
+  assert.deepEqual(s.lines.map(l => [l.acquired, l.quantity.toString(), l.basis_used, l.basis_eur.toFixed(2)]),
+    [["2020-01-10", "8", "HISTORISCH", "200.00"], ["2021-01-10", "12", "HISTORISCH", "300.00"]]);
+  eq(s.result_eur, "100");
+  assert.ok(rep.events[0].note.includes("NA (20 st. in totaal) + NB (30 st. in totaal) + 2 EUR cash"));
+  assert.deepEqual(M.holdingsAt(txs.slice(0, 3), "2025-12-31").map(h => [h.asset, h.quantity.toString()]), [["NA", "20"], ["NB", "30"]]);
+});
+
+test("exchange total quantity is exact over lots", () => {
+  const txs = [buy("2020-01-01", "OUD", 1, 3), buy("2020-02-01", "OUD", 1, 3), buy("2020-03-01", "OUD", 1, 3),
+    ruilQ("2023-01-01", "OUD", [["N", 1, null]]), sell("2026-02-01", "N", 1, 12)];
+  const s = calculate(txs, { N: "10" }).sales[0];
+  assert.equal(s.lines.length, 3); assert.equal(s.lines.reduce((a, l) => a.add(l.quantity), D(0)).toString(), "1");
+  assert.deepEqual(s.warnings, []); eq(s.result_eur, "2.01"); // 3 loten x (4,00 - 3,33): afronding per lot
+});
+
+test("lotsAt shows lots as the engine builds them", () => {
+  const txs = [buy("2020-01-10", "OUD", 40, 10), buy("2021-01-10", "OUD", 60, 10), ruilQ("2023-03-31", "OUD", [["NA", 20, null]]), sell("2024-01-01", "NA", 5, 1)];
+  assert.deepEqual(M.lotsAt(txs, {}, null, "2023-12-31").map(l => [l.asset, l.acquired, l.quantity.toString(), l.unit_cost_eur.toString()]),
+    [["NA", "2020-01-10", "8", "50"], ["NA", "2021-01-10", "12", "50"]]);
+  assert.deepEqual(M.lotsAt(txs, {}, null, "2024-12-31").map(l => l.quantity.toString()), ["3", "12"]);
+});
