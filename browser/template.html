@@ -195,6 +195,22 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
 .ruil-row input { width: 100%; min-width: 0; }
 @media (max-width: 520px) { .ruil-row { grid-template-columns: 1fr 1fr auto; } .ruil-row label:first-child { grid-column: 1 / 3; }
   .ruil-row button { grid-column: 3; grid-row: 1; } .ruil-row label:nth-child(3) { grid-column: 2 / 4; } }
+.exch { border: 1px solid var(--accent); border-radius: var(--radius); background: var(--accent-soft); padding: .8rem .9rem; margin: .5rem 0; }
+.exch.off { opacity: .6; }
+.exch h4 { margin: 0 0 .3rem; font-size: .95rem; }
+.exch .why { font-size: .78rem; color: var(--muted); margin: 0; }
+.exch-comp { display: grid; grid-template-columns: auto minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1.3fr); gap: .3rem .8rem; align-items: start;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: .55rem .7rem; margin-top: .45rem; }
+.exch-comp .lbl { display: block; font-size: .72rem; color: var(--muted); }
+.exch-comp .via { grid-column: 2 / -1; font-size: .78rem; color: var(--muted); }
+.exch-comp input[type=checkbox] { width: 18px; height: 18px; margin-top: .3rem; }
+.exch-comp input:not([type]) { width: 100%; font-size: 14px; padding: .3rem .45rem; }
+.exch-box { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: .55rem .7rem; margin-top: .5rem; }
+.exch-cols { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; margin-top: .6rem; }
+.exch-cols table { font-size: .84rem; } .exch-cols th, .exch-cols td { padding: .35rem .45rem; white-space: normal; }
+.exch .alert { margin: .3rem 0 0; font-size: .84rem; }
+#imp-warnings li.done { text-decoration: line-through; opacity: .7; }
+@media (max-width: 640px) { .exch-comp { grid-template-columns: auto 1fr 1fr; } .exch-comp .val { grid-column: 2 / -1; } .exch-cols { grid-template-columns: 1fr; } }
 .proofs ul { list-style: none; margin: .4rem 0 0; padding: 0; }
 .proofs li { display: flex; gap: .5rem; align-items: center; padding: .25rem 0; border-top: 1px solid var(--line); font-size: .9rem; }
 .proofs li:first-child { border-top: 0; }
@@ -436,13 +452,21 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
   <details id="imp-skipped-wrap"><summary class="small muted">Niet geïmporteerd</summary><ul id="imp-skipped" class="small"></ul></details>
   <label class="field" style="max-width:240px;margin-top:.8rem">Eigenaar <input id="imp-owner" list="owner-list"></label>
   <h3>Posities op 31/12/2025 controleren</h3>
-  <p class="hint">De export bevat geen splitsingen, overnames, naamswijzigingen of effecten die je van een andere bank overzette.
+  <p class="hint">De export bevat geen splitsingen, naamswijzigingen of effecten die je van een andere bank overzette, en overnames
+    maar gedeeltelijk (een omruiling wordt waar mogelijk herkend en als voorstel getoond onder de tabel).
     Vink uit wat je op 31/12/2025 niet meer had; de tool boekt het dan uit vóór 2026 (geen belastbaar moment).
     Vul de slotkoers op 31/12/2025 per stuk in als je die kent; ze is pas nodig wanneer je het effect verkoopt.
     Voor effecten in een andere munt vul je de slotkoers in die munt in, plus de wisselkoers van 31/12/2025
     (1 EUR = … munt of 1 munt = … EUR, kies de richting); de tool rekent om naar EUR. Vul de koers per effect zelf in: ze kan per broker verschillen.</p>
   <div class="table-wrap"><table id="imp-positions"><thead><tr><th>Bezit</th><th>Effect</th><th class="num">Aantal</th>
     <th class="col-div">Laatste dividend</th><th class="num">Waarde 31/12/2025</th></tr></thead><tbody></tbody></table></div>
+  <div id="imp-exch-wrap" hidden>
+    <h3>Omruilingen (fusie/overname)</h3>
+    <p class="hint">De export legt geen verband tussen een verdwenen effect en de effecten die je ervoor kreeg. De tool stelt een omruiling
+      voor op basis van de export; kijk ze na en bevestig. Vóór 2026 is een omruiling geen belastbaar moment. De aankoopdatum en -prijs gaan
+      over op de nieuwe effecten, verdeeld volgens de waarde op de ruildatum (eigen interpretatie, te bevestigen).</p>
+    <div id="imp-exch"></div>
+  </div>
   <div id="imp-delist-wrap" hidden>
     <h3>Delistings</h3>
     <p class="hint">De broker meldt dat de notering van deze effecten stopte terwijl je ze nog had. Kreeg je geld voor je stuks
@@ -485,7 +509,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
 </div></dialog>
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
-<datalist id="asset-list"></datalist><datalist id="owner-list"></datalist>
+<datalist id="asset-list"></datalist><datalist id="owner-list"></datalist><datalist id="exch-assets"></datalist>
 <datalist id="broker-list"><option value="Bolero"><option value="Saxo"></datalist>
 
 <script>/*ENGINE*/</script>

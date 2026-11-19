@@ -41,12 +41,14 @@ class BasisUsed(str, Enum):
 
 @dataclass
 class ExchangeComponent:
-    """Nieuw effect bij een omruiling: ratio = nieuwe stuks per oud stuk; value = waarde per nieuw stuk op de
-    ruildatum (in de munt van de transactie), nodig om de aanschaffingswaarde te verdelen."""
+    """Nieuw effect bij een omruiling: ratio = nieuwe stuks per oud stuk, of quantity = in totaal ontvangen stuks
+    (bv. uit een import; gaat voor op ratio); value = waarde per nieuw stuk op de ruildatum (in de munt van de
+    transactie), nodig om de aanschaffingswaarde te verdelen."""
 
     asset: str
-    ratio: Decimal
+    ratio: Decimal = Decimal("0")
     value: Optional[Decimal] = None
+    quantity: Optional[Decimal] = None
 
 
 @dataclass

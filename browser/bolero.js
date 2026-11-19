@@ -199,6 +199,7 @@
     };
     const tradeKeys = new Map(); // nameKey -> asset id
     const storno = []; // te annuleren regels
+    const caLines = []; // "Inboeking corporate action": kandidaat-nieuwe effecten bij een omruiling
 
     for (const l of lines) {
       const src = `${fileName}:${l.n}`;
@@ -263,9 +264,11 @@
           import_id: importId(l), import_source: src,
         };
         out.push(dv); lineOf.set(dv, l);
-      } else if (/^Inboeking corporate action/i.test(l.desc)) {
+      } else if ((m = /^Inboeking corporate action\s+(.+)$/i.exec(l.desc)) || /^Inboeking corporate action/i.test(l.desc)) {
         addCash("CA", l, { remark: "controleer de betrokken posities", warn: true });
-        warnings.push(`${src}: ${l.desc} – corporate action (bv. overname of omruiling) staat niet volledig in de export. Controleer de betrokken posities.`);
+        const warning = `${src}: ${l.desc} – corporate action (bv. overname of omruiling) staat niet volledig in de export. Controleer de betrokken posities.`;
+        warnings.push(warning);
+        if (m) caLines.push({ date: l.date, id: assetName(m[1]).id, qty, price, cashId: cash[cash.length - 1].import_id, warning, src });
       } else {
         const s = SKIP.find(([re]) => re.test(l.desc));
         addCash(s ? s[1] : "ANDERE", l, s ? {} : { remark: "onbekend type", warn: true });
@@ -326,12 +329,110 @@
       if (!h || h.quantity.lt(t.quantity)) short.push(t.asset);
     }
     const period = lines.length ? [lines[0].date, lines[lines.length - 1].date] : [null, null];
-    if (short.length)
-      warnings.unshift(`De export loopt van ${period[0]} tot ${period[1]} en bevat niet alle aankopen voor: ${[...new Set(short)].join(", ")}. ` +
-        "Importeer ook een export vanaf je eerste aankoop (of voeg de aankopen zelf toe), anders kan de meerwaarde niet berekend worden.");
-    return { transactions, cash, skipped, warnings, refHints, assets, positions, fileName, rows: lines.length, period, incomplete: [...new Set(short)] };
+    if (short.length) warnings.unshift(shortWarning(period, [...new Set(short)]));
+    const qtyOf = t => { const l = lineOf.get(t); return l ? bnum(l.r[C.qty]) : null; };
+    const descOf = t => lineOf.get(t)?.desc || "";
+    const exchanges = detectExchanges({ transactions, positions, caLines, incomplete: [...new Set(short)], qtyOf, descOf, fileName });
+    return { transactions, cash, skipped, warnings, refHints, assets, positions, fileName, rows: lines.length, period,
+             incomplete: [...new Set(short)], exchanges };
   }
 
-  const api = { parseBolero, parseBoleroRows, parseBoleroSheets, rowsFromSheet, beNum, duplicateFlags, contentKey, parseCsv, assetName, nameKey };
+  /** Waarschuwing voor verkopen zonder (voldoende) aankopen in de export. */
+  function shortWarning(period, assets) {
+    return `De export loopt van ${period[0]} tot ${period[1]} en bevat niet alle aankopen voor: ${assets.join(", ")}. ` +
+      "Importeer ook een export vanaf je eerste aankoop (of voeg de aankopen zelf toe), anders kan de meerwaarde niet berekend worden.";
+  }
+
+  // ------------------------------------------------------------ omruilingen (fusie/overname) herkennen
+  const dayOf = d => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)) / 864e5;
+  const sameName = (a, b) => { const x = nameKey(a), y = nameKey(b); return x.length >= 4 && y.length >= 4 && (x.startsWith(y) || y.startsWith(x)); };
+  const NEAR = 7;      // dagen rond de laatste regel van het oude effect (inboeking, cash)
+  const LATER = 183;   // nieuwe effecten zonder aankoop: eerste regel uiterlijk een half jaar later
+
+  /**
+   * Voorstellen voor omruilingen: een effect dat volgens de export nog in bezit is maar na een datum niet meer
+   * voorkomt, met rond die datum (a) een "Inboeking corporate action" van een ander effect en/of (b) effecten die
+   * daarna verkocht worden zonder aankoop in de export, en eventueel (c) een betaling voor exact het aantal stuks
+   * in bezit (de cash; Bolero boekt die als dividend). De export zelf legt geen verband: het blijft een voorstel
+   * dat de gebruiker bevestigt. -> [{ asset, date, quantity, components, cash, reasons, resolves, import_id }]
+   */
+  function detectExchanges({ transactions, positions, caLines, incomplete, qtyOf, descOf, fileName }) {
+    const of = name => transactions.filter(t => sameName(t.asset, name));
+    // effecten zonder (voldoende) aankopen: ontvangen aantal = grootste tekort, eerste regel
+    const orphans = incomplete.map(asset => {
+      const own = transactions.filter(t => t.asset === asset).sort((a, b) => a.trade_date < b.trade_date ? -1 : a.trade_date > b.trade_date ? 1 : 0);
+      let bal = ZERO, min = ZERO;
+      for (const t of own) {
+        if (t.type === "BUY") bal = bal.add(D(t.quantity));
+        else if (t.type === "SELL") { bal = bal.sub(D(t.quantity)); if (bal.lt(min)) min = bal; }
+      }
+      const first = of(asset).map(t => t.trade_date).sort()[0];
+      return { asset, qty: min.neg(), first, sells: own.filter(t => t.type === "SELL") };
+    }).filter(o => o.qty.gt(ZERO));
+    const cands = positions.filter(p => p.suspicious).map(p => {
+      const own = of(p.asset);
+      return { p, own, last: own.map(t => t.trade_date).sort().pop() };
+    }).filter(c => c.last);
+    // elk effect zonder aankoop hoort bij het oude effect met de laatste datum ervoor (binnen het venster)
+    const owner = new Map();
+    for (const o of orphans) {
+      const best = cands.filter(c => dayOf(o.first) >= dayOf(c.last) - NEAR && dayOf(o.first) <= dayOf(c.last) + LATER)
+        .sort((a, b) => dayOf(b.last) - dayOf(a.last))[0];
+      if (best) owner.set(o, best);
+    }
+    const out = [];
+    for (const c of cands) {
+      const near = d => Math.abs(dayOf(d) - dayOf(c.last)) <= NEAR;
+      const comps = [], reasons = [`${c.p.asset} komt na ${c.last} niet meer voor in de export`];
+      const resolvesWarnings = [], resolvesCash = [];
+      for (const ca of caLines.filter(x => near(x.date) && !sameName(x.id, c.p.asset))) {
+        const orphan = orphans.find(o => sameName(o.asset, ca.id));
+        const asset = orphan ? orphan.asset : ca.id;
+        if (comps.some(k => k.asset === asset)) continue;
+        comps.push({ asset, quantity: ca.qty && ca.qty.gt(ZERO) ? ca.qty.toString() : orphan ? orphan.qty.toString() : "",
+          value: ca.price && ca.price.gt(ZERO) ? ca.price.toString() : "",
+          value_note: ca.price && ca.price.gt(ZERO) ? "koers uit de inboekingsregel; de export vermeldt de munt niet: controleer" : "",
+          via: `Inboeking corporate action ${ca.date} (${ca.qty ?? "?"} st.${ca.price ? ` @ ${ca.price}` : ""})` +
+            (orphan ? `; verkocht zonder aankoop in de export` : "") });
+        resolvesWarnings.push(ca.warning); resolvesCash.push(ca.cashId);
+        if (!reasons.some(r => r.includes("inboeking"))) reasons.push(`op ${ca.date} een inboeking van een nieuw effect`);
+      }
+      for (const [o, best] of owner) {
+        if (best !== c || comps.some(k => k.asset === o.asset || sameName(k.asset, o.asset))) continue;
+        const s = o.sells[0];
+        comps.push({ asset: o.asset, quantity: o.qty.toString(), value: "", value_note: "",
+          via: `Verkocht ${s ? s.trade_date : "later"} zonder aankoop in de export (${o.qty} st.)` });
+        if (!reasons.some(r => r.startsWith("effecten die later"))) reasons.push("effecten die later verkocht worden zonder aankoop");
+      }
+      if (!comps.length) continue;
+      // cash: betaling voor exact het aantal stuks in bezit rond die datum (Bolero: "Uitbetaling dividenden")
+      let cash = null;
+      const divs = c.own.filter(t => t.type === "DIVIDEND");
+      const hit = divs.filter(t => near(t.trade_date) && qtyOf(t) && qtyOf(t).eq(c.p.quantity)).pop();
+      if (hit) {
+        const per = D(hit.amount).div(D(c.p.quantity));
+        const earlier = divs.filter(t => t !== hit && t.trade_date < hit.trade_date && qtyOf(t) && qtyOf(t).gt(ZERO))
+          .map(t => D(t.amount).div(qtyOf(t))).sort((a, b) => a.cmp(b));
+        const median = earlier.length ? earlier[Math.floor(earlier.length / 2)] : null;
+        const unusual = !median || per.gte(median.mul(5));
+        cash = { import_id: hit.import_id, amount: hit.amount, currency: hit.currency, fx_per_eur: hit.fx_per_eur,
+                 eur_per_ccy: hit.eur_per_ccy ?? null, per_share: per.round(10).toString(), date: hit.trade_date,
+                 description: descOf(hit), source: hit.import_source, checked: unusual,
+                 hint: unusual ? "veel hoger dan de gewone dividenden: waarschijnlijk de cash van de overname"
+                   : "in de lijn van de gewone dividenden: enkel aanvinken als het de cash van de overname is" };
+        reasons.push(`een betaling voor exact ${c.p.quantity} stuks op ${hit.trade_date}`);
+      }
+      const firsts = comps.map(k => (orphans.find(o => o.asset === k.asset) || {}).first).filter(Boolean);
+      const caDate = caLines.filter(x => near(x.date) && comps.some(k => sameName(k.asset, x.id))).map(x => x.date).sort()[0];
+      const date = [caDate || c.last, ...firsts].sort()[0];
+      out.push({ asset: c.p.asset, date, quantity: c.p.quantity, components: comps, cash, reasons,
+                 resolves: { warnings: resolvesWarnings, cash: resolvesCash, assets: comps.map(k => k.asset) },
+                 import_id: "b:ruil:" + fnv64(`${c.p.asset}|${date}`), source: fileName });
+    }
+    return out;
+  }
+
+  const api = { parseBolero, parseBoleroRows, parseBoleroSheets, rowsFromSheet, beNum, duplicateFlags, contentKey, parseCsv, assetName, nameKey,
+                shortWarning, sameName };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.BOLERO = api;
 })(typeof window !== "undefined" ? window : globalThis);

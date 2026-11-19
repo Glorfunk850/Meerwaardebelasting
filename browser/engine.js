@@ -99,8 +99,11 @@
       historic_proven: !!t.historic_proven, cost_known: t.cost_known !== false,
       reynders_eur: D(t.reynders_eur ?? 0), amount: D(t.amount ?? 0), source: t.source || "",
       delist_mode: t.delist_mode || "",
-      // RUIL: nieuwe effecten per oud stuk; value = waarde per nieuw stuk op de ruildatum (in `currency`), om te verdelen
-      components: (t.components || []).map(c => ({ asset: String(c.asset ?? "").trim(), ratio: D(c.ratio ?? 0),
+      // RUIL: nieuwe effecten per oud stuk (ratio) of in totaal ontvangen (quantity, bv. uit een import);
+      // value = waarde per nieuw stuk op de ruildatum (in `currency`), om de aanschaffingswaarde te verdelen
+      components: (t.components || []).map(c => ({ asset: String(c.asset ?? "").trim(),
+        ratio: c.ratio != null && c.ratio !== "" ? D(c.ratio) : ZERO,
+        quantity: c.quantity != null && c.quantity !== "" ? D(c.quantity) : null,
         value: c.value != null && c.value !== "" ? D(c.value) : null })),
     };
   }
@@ -210,6 +213,25 @@
   /** transactions: array (plain objects), refValues: {asset: "80.00"}, withheld: {"owner|year": "360"} */
   function calculate(transactions, refValues, cfg, withheld = {}, throughYear = null) {
     cfg = cfg || defaultConfig();
+    const { sales, dividends, events } = run(transactions, refValues, cfg);
+    const years = summarize(sales, dividends, cfg, withheld, throughYear);
+    const warnings = sales.flatMap(s => s.warnings.map(w => `${s.trade_date} ${s.asset}: ${w}`))
+      .concat(events.filter(e => e.kind !== "UITKOOP" && e.kind !== "RUIL").map(e => `${e.trade_date} ${e.asset}: ${e.note}`))
+      .concat(events.filter(e => e.warning).map(e => `${e.trade_date} ${e.asset}: ${e.warning}`));
+    return { sales, years, warnings, events,
+             disclaimer: "Deze berekening is een hulpmiddel en geen fiscaal advies. Controleer altijd met de officiële bronnen (FOD Financiën) of een adviseur." };
+  }
+
+  /** Loten (FIFO-pools) na alle transacties t.e.m. `date`, zoals de rekenkern ze opbouwt; enkel loten met stuks.
+   *  Voor weergave (bv. het gevolg van een omruiling); rekent niets bij. */
+  function lotsAt(transactions, refValues, cfg, date) {
+    const { pools } = run(transactions.filter(t => t.trade_date <= date), refValues || {}, cfg || defaultConfig());
+    return [...pools.values()].flat().filter(l => l.quantity.gt(ZERO))
+      .map(l => ({ owner: l.owner, broker: l.broker, asset: l.asset, acquired: l.acquired, quantity: l.quantity,
+                   unit_cost_eur: l.costKnown ? l.unitCost : null, historic_proven: l.historicProven }));
+  }
+
+  function run(transactions, refValues, cfg) {
     const txs = transactions.map((t, i) => ({ ...tx(t), _i: i }))
       .sort((a, b) => a.trade_date < b.trade_date ? -1 : a.trade_date > b.trade_date ? 1 : a._i - b._i);
     const pools = new Map(), sales = [], dividends = new Map(), events = [];
@@ -248,12 +270,7 @@
         dividends.set(k, (dividends.get(k) || ZERO).add(toEur(t, t.amount)));
       }
     }
-    const years = summarize(sales, dividends, cfg, withheld, throughYear);
-    const warnings = sales.flatMap(s => s.warnings.map(w => `${s.trade_date} ${s.asset}: ${w}`))
-      .concat(events.filter(e => e.kind !== "UITKOOP" && e.kind !== "RUIL").map(e => `${e.trade_date} ${e.asset}: ${e.note}`))
-      .concat(events.filter(e => e.warning).map(e => `${e.trade_date} ${e.asset}: ${e.warning}`));
-    return { sales, years, warnings, events,
-             disclaimer: "Deze berekening is een hulpmiddel en geen fiscaal advies. Controleer altijd met de officiële bronnen (FOD Financiën) of een adviseur." };
+    return { pools, sales, dividends, events };
   }
 
   const DELIST_NOTES = {
@@ -292,11 +309,11 @@
   // ------------------------------------------------------------ omruiling (fusie, overname met ruil in aandelen)
   /** Gewichten voor de verdeling van de aanschaffingswaarde over de nieuwe effecten en de cash (opleg), volgens hun
    *  waarde op de ruildatum. Eén nieuw effect zonder cash: alles gaat over. Anders zijn alle waarden nodig; zonder → null. */
-  function exchangeWeights(t) {
+  function exchangeWeights(t, ratioOf) {
     const comps = t.components, cash = t.price;
     if (comps.length === 1 && cash.isZero()) return { comps: [ONE], cash: ZERO };
     if (comps.some(c => !c.value)) return null;
-    const parts = comps.map(c => c.ratio.mul(c.value)), total = sum(parts).add(cash);
+    const parts = comps.map(c => ratioOf(c).mul(c.value)), total = sum(parts).add(cash);
     if (!total.gt(ZERO)) return null;
     return { comps: parts.map(x => x.div(total)), cash: cash.div(total) };
   }
@@ -307,13 +324,11 @@
     for (const c of comps) {
       if (!c.asset) throw new Error(`Omruiling: naam van het nieuwe effect ontbreekt (${t.source})`);
       if (c.asset === t.asset) throw new Error(`Omruiling: het nieuwe effect moet verschillen van ${t.asset} (${t.source})`);
-      if (!c.ratio.gt(ZERO)) throw new Error(`Omruiling: ratio voor ${c.asset} moet groter dan 0 zijn (${t.source})`);
+      if (!(c.quantity ? c.quantity : c.ratio).gt(ZERO)) throw new Error(`Omruiling: ratio voor ${c.asset} moet groter dan 0 zijn (${t.source})`);
       if (c.value && c.value.lt(ZERO)) throw new Error(`Omruiling: waarde van ${c.asset} mag niet negatief zijn (${t.source})`);
     }
     if (t.price.lt(ZERO)) throw new Error(`Omruiling: cash per stuk mag niet negatief zijn (${t.source})`);
-    const late = t.trade_date >= START, w = exchangeWeights(t);
-    if (!w && late) throw new Error(`Omruiling van ${t.asset} op ${t.trade_date}: vul voor elk nieuw effect de waarde per stuk ` +
-      `op de ruildatum in (nodig om de aanschaffingswaarde te verdelen over de nieuwe effecten en de cash).`);
+    const late = t.trade_date >= START;
     const held = sum(p.map(l => l.quantity));
     const qty = t.quantity.gt(ZERO) ? Dec.min(t.quantity, held) : held;
     const event = { trade_date: t.trade_date, owner: t.owner, broker: t.broker, asset: t.asset, kind: "RUIL",
@@ -324,6 +339,10 @@
       event.warning = event.note;
       return nextId;
     }
+    const ratioOf = c => c.quantity ? c.quantity.div(qty) : c.ratio;  // nieuwe stuks per oud stuk
+    const w = exchangeWeights(t, ratioOf);
+    if (!w && late) throw new Error(`Omruiling van ${t.asset} op ${t.trade_date}: vul voor elk nieuw effect de waarde per stuk ` +
+      `op de ruildatum in (nodig om de aanschaffingswaarde te verdelen over de nieuwe effecten en de cash).`);
     // FIFO de omgeruilde stuks nemen (de loten blijven in de pool, zoals bij een verkoop)
     const parts = [];
     let remaining = qty;
@@ -338,21 +357,24 @@
         throw new Error(`Geen waarde op 31/12/2025 voor ${t.asset} (nodig voor de omruiling op ${t.trade_date} van het lot van ${lot.acquired}).`);
     // nieuwe loten: zelfde verwervingsdatum, aanschaffingswaarde verdeeld volgens de waarde op de ruildatum
     comps.forEach((c, i) => {
-      const f = w ? w.comps[i] : null;
+      const f = w ? w.comps[i] : null, r = ratioOf(c);
       const target = pool(poolKey({ owner: t.owner, broker: t.broker, asset: c.asset }, cfg.fifoScope));
-      for (const { lot, q } of parts) {
-        const n = q.mul(c.ratio);
+      let given = ZERO;
+      parts.forEach(({ lot, q }, j) => {
+        // totaal ontvangen aantal: evenredig over de loten, het laatste lot krijgt de rest (som exact)
+        const n = !c.quantity ? q.mul(c.ratio) : j === parts.length - 1 ? c.quantity.sub(given) : c.quantity.mul(q).div(qty);
+        given = given.add(n);
         let unitRef = null;
         if (isPre(lot)) {
           if (!late) { if (refValues[c.asset] != null && refValues[c.asset] !== "") unitRef = D(refValues[c.asset]); }
-          else unitRef = lot.unitRef.mul(f).div(c.ratio);
+          else unitRef = lot.unitRef.mul(f).div(r);
         }
         target.push({ lotId: nextId++, owner: lot.owner, broker: lot.broker, asset: c.asset, acquired: lot.acquired,
-                      quantity: n, origQuantity: n, unitCost: f ? lot.unitCost.mul(f).div(c.ratio) : ZERO,
+                      quantity: n, origQuantity: n, unitCost: f ? lot.unitCost.mul(f).div(r) : ZERO,
                       historicProven: lot.historicProven, costKnown: lot.costKnown && !!f, unitRef, source: t.source });
-      }
+      });
     });
-    const per = comps.map(c => `${c.ratio} ${c.asset}`).join(" + ") + (t.price.gt(ZERO) ? ` + ${t.price} ${t.currency} cash` : "");
+    const per = comps.map(c => c.quantity ? `${c.asset} (${c.quantity} st. in totaal)` : `${c.ratio} ${c.asset}`).join(" + ") + (t.price.gt(ZERO) ? ` + ${t.price} ${t.currency} cash` : "");
     if (!late) {
       event.note = `Omruiling vóór 2026 (${per} per stuk): geen belastbaar moment. Voor de nieuwe effecten geldt hun waarde op ` +
         `31/12/2025; de aankoopdatum en -prijs van ${t.asset} gaan over op de nieuwe effecten` +
@@ -447,11 +469,11 @@
       else if (t.type === "SELL" || (t.type === "DELISTING" && t.delist_mode === "UITKOOP") || t.type === "RUIL") {
         const held = sum(p.map(l => l.quantity));
         let q = t.quantity.gt(ZERO) ? Dec.min(t.quantity, held) : held;
-        if (t.type === "RUIL") for (const c of t.components) {
-          if (!c.asset || c.asset === t.asset || !c.ratio.gt(ZERO)) continue;
+        if (t.type === "RUIL" && q.gt(ZERO)) for (const c of t.components) {
+          if (!c.asset || c.asset === t.asset || !(c.quantity ? c.quantity : c.ratio).gt(ZERO)) continue;
           const k2 = poolKey({ ...t, asset: c.asset }, cfg.fifoScope);
           if (!pools.has(k2)) pools.set(k2, { owner: t.owner, asset: c.asset, lots: [] });
-          pools.get(k2).lots.push({ quantity: q.mul(c.ratio) });
+          pools.get(k2).lots.push({ quantity: c.quantity ? c.quantity : q.mul(c.ratio) });
         }
         for (const l of p) { if (!q.gt(ZERO)) break; const u = Dec.min(q, l.quantity); l.quantity = l.quantity.sub(u); q = q.sub(u); }
       }
@@ -487,6 +509,6 @@
     return res;
   }
 
-  const api = { Dec, D, ZERO, ONE, money, TxType, DelistModes, ACQ, defaultConfig, calculate, compareMethods, holdingsAt, refValueFromCurrency, refValueFromEurRate };
+  const api = { Dec, D, ZERO, ONE, money, TxType, DelistModes, ACQ, defaultConfig, calculate, compareMethods, holdingsAt, lotsAt, refValueFromCurrency, refValueFromEurRate };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.MWB = api;
 })(typeof window !== "undefined" ? window : globalThis);

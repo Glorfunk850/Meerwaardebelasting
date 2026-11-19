@@ -99,6 +99,23 @@ dan verschuift FIFO bij die latere verkopen; dat zit mee in het verschil. Kosten
   - Fracties die in cash uitbetaald werden: registreer een verkoop van het nieuwe effect op dezelfde datum. Staan de
     nieuwe effecten ook als aankoop in de export van je broker, verwijder die aankoop (anders tellen ze dubbel).
   - Een aankoop van een omgeruild effect telt voor *Bewijs ontbreekt* als 'in bezit' zolang de nieuwe effecten in bezit zijn.
+  - Per nieuw effect kan ook het **totaal ontvangen aantal** ingevuld zijn (zo bewaart de import het): dat wordt evenredig over
+    de omgeruilde loten verdeeld, het laatste lot krijgt de rest, zodat het totaal exact klopt.
+- Bolero-import, omruiling herkennen (voorstel, de gebruiker bevestigt): de export legt geen verband tussen het oude en de nieuwe
+  effecten (bij een overname staat bv. enkel een "Inboeking corporate action" van één nieuw effect en de cash als
+  "Uitbetaling dividenden"). De importer zoekt daarom per positie die volgens de export nog open staat maar na een datum niet meer
+  voorkomt:
+  - "Inboeking corporate action"-regels binnen 7 dagen van die datum (aantal en koers; de munt van de koers staat er niet bij);
+  - effecten die verkocht worden zonder aankoop in de export, met hun eerste regel tot een half jaar later (ontvangen aantal =
+    grootste tekort); elk zo'n effect hoort bij het oude effect met de laatste datum ervoor;
+  - de cash: een betaling binnen 7 dagen voor exact het aantal stuks in bezit. Standaard aangevinkt als ze per stuk minstens
+    5 keer zo hoog is als de mediaan van de vorige dividenden (of als er geen vorige zijn).
+  In het importvenster staat het voorstel onder de positietabel: nieuwe effecten aan/uit, zelf een effect toevoegen, waarde per
+  stuk op de ruildatum, cash aan/uit, met het gevolg voor de loten. Bevestigd: een transactie *Omruiling* (met het totaal
+  ontvangen aantal per nieuw effect), de betaling wordt geen dividend maar een geldbeweging *verwerkt*, de inboekingsregel
+  ook, en het oude effect wordt niet als 'niet meer in bezit' gecorrigeerd. Een nieuwe import van dezelfde export toont het
+  voorstel niet opnieuw en voegt de betaling niet alsnog als dividend toe. Zonder nieuw effect geen voorstel: de positie blijft
+  gemarkeerd zoals voordien. Saxo: nog niet (geen voorbeeld van een fusie in een Saxo-export).
 - Valutawinst op cash in vreemde munt wordt niet berekend.
 - Bolero: wisselkoers staat niet in de export; afgeleid uit wisseltransacties of geschat uit het nettobedrag (gemarkeerd).
 - Bolero: de Excel-export wordt omgezet naar dezelfde regels als de CSV-export. Transacties die al geïmporteerd zijn

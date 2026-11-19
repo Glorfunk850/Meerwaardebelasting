@@ -171,3 +171,52 @@ test("real export (optional)", { skip: !process.env.BOLERO_FILE }, async () => {
   }
   function D2(v) { return M.D(v).toFixed(2); }
 });
+
+// ---------------------------------------------------------------- omruiling (verzonnen overname in Bolero-formaat)
+const RUIL_SAMPLE = [
+  ",,,,,,,,,,,,,,,,,,,,,,,,,", HDR,
+  row("11/07/2024", "Verkoop Online ZILVER CORP (NY)", "1.200,00", "EUR", "90", "14,50"),
+  row("26/06/2024", "Verkoop Online GOUD MIJNEN (NY)", "920,00", "EUR", "20", "50,00"),
+  row("12/05/2024", "Uitbetaling dividenden CP ZILVER CORP 13.04.24", "4,00", "EUR", "90", "0,05"),
+  row("10/04/2024", "Kost igv corporate actions", "-5,00", "EUR"),
+  row("06/04/2024", "Uitbetaling dividenden CP OUDE MIJN INC  (NY) 06.04.24", "500,00", "EUR", "500", "1,00"),
+  row("06/04/2024", "Inboeking corporate action GOUD MIJNEN  (NY)", "-3,00", "EUR", "20", "45,00"),
+  row("13/01/2024", "Uitbetaling dividenden CP OUDE MIJN INC  (NY) 29.12.23", "10,00", "EUR", "500", "0,02"),
+  row("14/10/2023", "Uitbetaling dividenden CP OUDE MIJN INC  (NY) 29.09.23", "10,00", "EUR", "500", "0,02"),
+  row("04/03/2021", "Aankoop Online OUDE MIJN INC  (NY)", "-1.200,00", "EUR", "300", "4,80"),
+  row("08/12/2020", "Aankoop Online OUDE MIJN INC  (NY)", "-1.000,00", "EUR", "200", "5,90"),
+  row("02/02/2020", "Aankoop Online ANDER NV (BR)", "-500,00", "EUR", "10", "50,00"),
+].join("\r\n");
+
+test("omruiling: voorstel uit inboeking, effecten zonder aankoop en de cash", () => {
+  const r = B.parseBolero(RUIL_SAMPLE, { owner: "ik", fileName: "r.csv" });
+  assert.equal(r.exchanges.length, 1);
+  const x = r.exchanges[0];
+  assert.equal(x.asset, "OUDE MIJN INC (NY)"); assert.equal(x.date, "2024-04-06"); assert.equal(x.quantity, "500");
+  assert.deepEqual(x.components.map(c => [c.asset, c.quantity, c.value]),
+    [["GOUD MIJNEN (NY)", "20", "45"], ["ZILVER CORP (NY)", "90", ""]]);
+  assert.ok(x.components[0].value_note.includes("munt"));
+  assert.equal(x.cash.amount, "500"); assert.equal(x.cash.per_share, "1"); assert.equal(x.cash.checked, true);
+  assert.ok(x.cash.description.startsWith("Uitbetaling dividenden CP OUDE MIJN"));
+  const div = r.transactions.find(t => t.import_id === x.cash.import_id);
+  assert.equal(div.type, "DIVIDEND");
+  assert.equal(x.resolves.warnings.length, 1); assert.ok(x.resolves.warnings[0].includes("Inboeking corporate action"));
+  assert.ok(r.cash.some(c => c.import_id === x.resolves.cash[0] && c.kind === "CA"));
+  assert.deepEqual(x.reasons.length, 4);
+  assert.ok(x.import_id.startsWith("b:ruil:"));
+  // stabiel bij een nieuwe import
+  assert.equal(B.parseBolero(RUIL_SAMPLE, { owner: "ik", fileName: "r.csv" }).exchanges[0].import_id, x.import_id);
+  // de omruiling sluit de posities: geen effect meer open, geen stuks tekort
+  const ruil = { type: "RUIL", trade_date: x.date, asset: x.asset, quantity: "0", price: x.cash.per_share, owner: "ik",
+    components: x.components.map(c => ({ asset: c.asset, quantity: c.quantity, value: c.value || null })) };
+  const txs = [...r.transactions.filter(t => t.import_id !== x.cash.import_id), ruil];
+  assert.deepEqual(M.holdingsAt(txs, "2025-12-31").map(h => h.asset), ["ANDER NV (BR)"]);
+});
+
+test("omruiling: geen voorstel zonder nieuw effect; gewone dividend niet aangevinkt als cash", () => {
+  const plain = RUIL_SAMPLE.split("\r\n").filter(l => !/GOUD MIJNEN|ZILVER CORP/.test(l)).join("\r\n");
+  assert.deepEqual(B.parseBolero(plain, { owner: "ik", fileName: "r.csv" }).exchanges, []);
+  const normal = RUIL_SAMPLE.replace('"500,00",,EUR,,500,,"1,00"', '"10,00",,EUR,,500,,"0,02"');
+  const x = B.parseBolero(normal, { owner: "ik", fileName: "r.csv" }).exchanges[0];
+  assert.equal(x.cash.checked, false); assert.ok(x.cash.hint.includes("gewone dividenden"));
+});

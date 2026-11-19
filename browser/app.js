@@ -209,14 +209,16 @@ function validateTx(p) {
   else if (p.type === "RUIL") {
     out.quantity = dec(p.quantity, "aantal oude stuks", { positive: true }) ?? "0";
     out.price = dec(p.price, "cash per oud stuk", { nonNegative: true }) ?? "0";
-    const comps = (p.components || []).filter(c => [c.asset, c.ratio, c.value].some(v => String(v ?? "").trim() !== ""));
+    const comps = (p.components || []).filter(c => [c.asset, c.ratio, c.quantity, c.value].some(v => String(v ?? "").trim() !== ""));
     if (!comps.length) throw new InputError("Vul minstens één nieuw effect in (naam en aantal per oud stuk).");
     out.components = comps.map(c => {
       const a = String(c.asset || "").trim().toUpperCase();
       if (!a) throw new InputError("Naam van het nieuwe effect ontbreekt.");
       if (a === asset) throw new InputError("Het nieuwe effect moet verschillen van het oude.");
-      return { asset: a, ratio: dec(c.ratio, `aantal ${a} per oud stuk`, { required: true, positive: true }),
-               value: dec(c.value, `waarde per stuk ${a}`, { nonNegative: true }) };
+      const value = dec(c.value, `waarde per stuk ${a}`, { nonNegative: true });
+      // totaal ontvangen (bv. uit een import) of aantal per oud stuk
+      if (hasVal(c.quantity)) return { asset: a, quantity: dec(c.quantity, `ontvangen stuks ${a}`, { required: true, positive: true }), value };
+      return { asset: a, ratio: dec(c.ratio, `aantal ${a} per oud stuk`, { required: true, positive: true }), value };
     });
     if (new Set(out.components.map(c => c.asset)).size < out.components.length) throw new InputError("Elk nieuw effect maar één keer invullen.");
     if ((out.components.length > 1 || D(out.price).gt(0)) && out.components.some(c => c.value == null) && p.trade_date >= "2026-01-01")
@@ -723,7 +725,7 @@ function txRow(t, hasProof, missing) {
     const amt = t.type === "DIVIDEND" || t.type === "FEE";
     const value = t.type === "SPLIT" ? `${num(t.split_ratio)} : 1` : amt ? num(t.amount)
       : t.type === "DELISTING" ? (t.delist_mode === "UITKOOP" ? num(t.price) : "")
-      : t.type === "RUIL" ? `<span class="small">→ ${(t.components || []).map(c => `${num(c.ratio)} ${esc(c.asset)}`).join(" + ")}${D(t.price || 0).gt(0) ? ` + ${num(t.price)} cash` : ""}</span>`
+      : t.type === "RUIL" ? `<span class="small">→ ${(t.components || []).map(c => hasVal(c.quantity) ? `${num(c.quantity)} st. ${esc(c.asset)}` : `${num(c.ratio)} ${esc(c.asset)}`).join(" + ")}${D(t.price || 0).gt(0) ? ` + ${num(t.price)} cash` : ""}</span>`
       : num(t.price);
     return `<tr data-id="${t.id}" class="clickable" title="Tik om te bewerken">
       <td>${esc(t.trade_date)}</td>
@@ -803,13 +805,14 @@ function addRuilRow(c = {}) {
   const row = document.createElement("div");
   row.className = "ruil-row";
   row.innerHTML = `<label>Nieuw effect (naam) <input name="c_asset" autocomplete="off" autocapitalize="characters" list="asset-list" value="${esc(c.asset)}"></label>
-    <label>Aantal per oud stuk <input name="c_ratio" inputmode="decimal" placeholder="bv. 0,1598" value="${esc(c.ratio)}"></label>
+    ${hasVal(c.quantity) ? `<label>Totaal ontvangen (st.) <input name="c_quantity" inputmode="decimal" value="${esc(c.quantity)}"></label>`
+      : `<label>Aantal per oud stuk <input name="c_ratio" inputmode="decimal" placeholder="bv. 0,1598" value="${esc(c.ratio)}"></label>`}
     <label>Waarde per stuk op ruildatum <input name="c_value" inputmode="decimal" value="${esc(c.value)}"></label>
     <button type="button" class="btn small danger" data-ruil-del aria-label="Verwijder dit effect">✕</button>`;
   $("#ruil-rows").append(row);
 }
 const readRuilRows = () => $$(".ruil-row", form).map(r => ({ asset: $("[name=c_asset]", r).value.trim(),
-  ratio: $("[name=c_ratio]", r).value.trim(), value: $("[name=c_value]", r).value.trim() }));
+  ratio: $("[name=c_ratio]", r)?.value.trim() ?? "", quantity: $("[name=c_quantity]", r)?.value.trim() ?? "", value: $("[name=c_value]", r).value.trim() }));
 $("#ruil-add").addEventListener("click", () => addRuilRow());
 $("#ruil-rows").addEventListener("click", e => {
   const b = e.target.closest("[data-ruil-del]");
@@ -1446,7 +1449,7 @@ function openImportDialog(r) {
     <td>${esc(d.date)}</td><td class="num">${num(d.quantity)}</td>
     <td><select name="mode">${Object.entries(DELIST_LABELS).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("")}</select></td>
     <td><input name="price" inputmode="decimal" class="num" placeholder="EUR per stuk" disabled aria-label="Uitkoopprijs"></td></tr>`).join("");
-  const dupFlags = window.BOLERO.duplicateFlags(state.transactions, r.transactions);
+  const dupFlags = importDupFlags(r);
   const fresh = r.transactions.filter((t, i) => !dupFlags[i]);
   const cnt = type => fresh.filter(t => t.type === type).length;
   const dup = r.transactions.length - fresh.length;
@@ -1467,6 +1470,7 @@ function openImportDialog(r) {
   $("#imp-skipped").innerHTML = Object.entries(r.skipped).map(([k, v]) => `<li>${esc(k)}: ${v}</li>`).join("");
   $("#imp-skipped-wrap").hidden = !Object.keys(r.skipped).length;
   $("#imp-owner").value = DEFAULT_OWNER;
+  r.exch = exchangeProposals(r);
   $("#imp-positions tbody").innerHTML = r.positions.map((p, i) => {
     const oldKey = [...(r.keyMoves || [])].find(([, to]) => to === p.asset)?.[0];
     const known = [state.assets[p.asset], oldKey && state.assets[oldKey]].find(a => a && hasVal(a.ref_value_eur));
@@ -1474,20 +1478,153 @@ function openImportDialog(r) {
     const ccy = String(r.assets?.[p.asset]?.currency || state.assets[p.asset]?.currency || "EUR").toUpperCase();
     const val = known ? refFields(known) : { ref_value_eur: p.refHint?.value ?? "" };
     return `<tr data-i="${i}" class="${p.suspicious ? "suspicious" : ""}">
-      <td><input type="checkbox" name="keep" ${p.suspicious ? "" : "checked"} aria-label="Nog in bezit"></td>
-      <td><strong>${esc(p.asset)}</strong>${p.name ? `<br><span class="small muted">${esc(p.name)}</span>` : ""}${p.suspicious ? `<br><span class="small neg">waarschijnlijk niet meer in bezit (overname, splitsing of naamswijziging?)</span>` : ""}</td>
+      <td><input type="checkbox" name="keep" ${p.suspicious || exchangedBefore(p.asset) ? "" : "checked"} ${exchangedBefore(p.asset) ? "disabled" : ""} aria-label="Nog in bezit"></td>
+      <td><strong>${esc(p.asset)}</strong>${p.name ? `<br><span class="small muted">${esc(p.name)}</span>` : ""}<span class="exch-state small"></span>${exchangedBefore(p.asset)
+        ? `<br><span class="small pos">al omgeruild (eerder bevestigd): wordt niet uitgeboekt</span>`
+        : p.suspicious && !r.exch.some(e => e.x.asset === p.asset) ? `<br><span class="small neg">waarschijnlijk niet meer in bezit (overname, splitsing of naamswijziging?)</span>` : ""}</td>
       <td class="num">${num(p.quantity)}</td>
       <td class="col-div">${esc(p.lastDividend || "–")}</td>
       <td>${refInputs(ccy, val, ccy === "EUR" ? "slotkoers in EUR" : "")}
         <span class="hint need-hint" hidden></span>
         ${p.refHint && cur == null ? `<span class="hint">${esc(p.refHint.from)}</span>` : ""}</td></tr>`;
   }).join("") || `<tr><td colspan="5" class="muted">Geen posities op 31/12/2025 volgens deze export.</td></tr>`;
-  $("#imp-warnings").innerHTML = r.warnings.map(w => `<li>${esc(w)}</li>`).join("");
-  $("#imp-warn-wrap").hidden = !r.warnings.length;
-  $("#imp-warn-count").textContent = r.warnings.length;
+  renderExchanges();
   $("#import-dialog").showModal();
   markNeededRefs();
 }
+
+// ---------------------------------------------------------------- omruilingen bij import (voorstel, bevestigen)
+/** Omruilingen die al bevestigd zijn (in de tool), per oud effect. */
+const exchangedBefore = asset => state.transactions.some(t => t.type === "RUIL" && t.asset === asset);
+/** Dubbels zoals voorheen, plus de 'dividenden' die bij een eerder bevestigde omruiling als cash verwerkt zijn. */
+function importDupFlags(r) {
+  const flags = window.BOLERO.duplicateFlags(state.transactions, r.transactions);
+  const ids = new Set(), keys = new Set();
+  for (const t of state.transactions) if (t.type === "RUIL") { if (t.cash_import_id) ids.add(t.cash_import_id); if (t.cash_content_key) keys.add(t.cash_content_key); }
+  return r.transactions.map((t, i) => flags[i] || ids.has(t.import_id) || (t.type === "DIVIDEND" && keys.has(window.BOLERO.contentKey(t))));
+}
+function exchangeProposals(r) {
+  return (r.exchanges || []).filter(x => !exchangedBefore(x.asset) && !state.transactions.some(t => t.import_id === x.import_id))
+    .map(x => ({ x, accept: true, cashOn: !!x.cash?.checked, comps: x.components.map(c => ({ ...c, on: true })) }));
+}
+const exchAccepted = e => e.accept && e.comps.some(c => c.on && c.asset.trim() && hasVal(c.quantity));
+/** Transactie 'Omruiling' uit een voorstel (gooit InputError bij ongeldige invoer). */
+function exchangeTx(e, owner) {
+  const comps = e.comps.filter(c => c.on && (c.asset.trim() || hasVal(c.quantity)));
+  if (!comps.length) throw new InputError(`Omruiling ${e.x.asset}: kies minstens één nieuw effect.`);
+  const cash = e.cashOn ? e.x.cash : null;
+  const raw = { type: "RUIL", trade_date: e.x.date, asset: e.x.asset, owner, broker: "Bolero", quantity: "", price: cash ? cash.per_share : "0",
+    currency: cash ? cash.currency : "EUR", fx_per_eur: cash ? cash.fx_per_eur : "1", eur_per_ccy: cash ? cash.eur_per_ccy : null,
+    components: comps.map(c => ({ asset: c.asset, quantity: c.quantity, value: c.value })) };
+  return { ...validateTx(raw), import_id: e.x.import_id, import_source: e.x.source,
+    cash_import_id: cash ? cash.import_id : null, cash_content_key: cash ? window.BOLERO.contentKey(pendingDividend(cash.import_id)) : null,
+    note: "Omruiling volgens de Bolero-export (voorstel bevestigd bij import)" };
+}
+const pendingDividend = id => (pendingImport?.transactions || []).find(t => t.import_id === id) || {};
+function renderExchanges() {
+  const r = pendingImport; if (!r) return;
+  $("#imp-exch-wrap").hidden = !r.exch.length;
+  $("#exch-assets").innerHTML = [...new Set([...(r.incomplete || []), ...Object.keys(state.assets)])].map(a => `<option value="${esc(a)}">`).join("");
+  $("#imp-exch").innerHTML = r.exch.map((e, i) => `<div class="exch" data-x="${i}">
+    <h4>Voorstel: ${esc(e.x.asset)} omgeruild op ${esc(e.x.date)}</h4>
+    <p class="why">Waarom: ${e.x.reasons.map(esc).join(" · ")}.</p>
+    <div class="comps">${e.comps.map((c, j) => exchCompHtml(e, c, j)).join("")}</div>
+    <p style="margin:.45rem 0 0"><button type="button" class="btn small ghost" data-exch-add>+ Ander effect toevoegen</button></p>
+    ${e.x.cash ? `<div class="exch-box"><label class="check" style="margin:0"><input type="checkbox" data-exch-cash ${e.cashOn ? "checked" : ""}>
+      <span><strong>Cash bij omruiling:</strong> ${esc(e.x.cash.currency)} ${num(e.x.cash.amount)} op ${esc(e.x.cash.date)} voor ${num(e.x.quantity)} stuks
+      (${num(D(e.x.cash.per_share).toString())} per oud stuk).<span class="why"><br>In de export als "${esc(e.x.cash.description)}"; ${esc(e.x.cash.hint)}.
+      Aangevinkt: telt niet als dividend, maar als cash van de overname.</span></span></label></div>` : ""}
+    <div class="exch-cols"><div><strong class="small">Wordt toegevoegd</strong><div class="exch-tx"></div></div>
+      <div><strong class="small">Gevolg voor je loten</strong><div class="exch-lots"></div></div></div>
+    <label class="check" style="margin-top:.6rem"><input type="checkbox" data-exch-accept ${e.accept ? "checked" : ""}> <strong>Omruiling toevoegen bij import</strong></label>
+  </div>`).join("");
+  updateExchanges();
+}
+function exchCompHtml(e, c, j) {
+  const ratio = hasVal(c.quantity) && !D(e.x.quantity).isZero() ? (() => { try { return num(D(c.quantity).div(D(e.x.quantity)).round(6).toString()); } catch { return "–"; } })() : "–";
+  return `<div class="exch-comp" data-c="${j}">
+    <input type="checkbox" data-k="on" ${c.on ? "checked" : ""} aria-label="Meenemen">
+    <div><span class="lbl">Nieuw effect</span>${c.manual ? `<input data-k="asset" value="${esc(c.asset)}" list="exch-assets" placeholder="naam" aria-label="Nieuw effect">` : `<strong>${esc(c.asset)}</strong>`}</div>
+    <div><span class="lbl">Ontvangen · per oud stuk</span>${c.manual ? `<input data-k="quantity" value="${esc(c.quantity)}" inputmode="decimal" aria-label="Ontvangen stuks" style="width:5.5rem">`
+      : `<strong>${num(c.quantity)}</strong>`} st. · <span class="ratio">${ratio}</span></div>
+    <div class="val"><span class="lbl">Waarde per stuk op ruildatum</span><input data-k="value" value="${esc(c.value)}" inputmode="decimal" placeholder="leeg = niet verdelen" aria-label="Waarde per stuk">
+      ${c.value_note ? `<span class="hint">${esc(c.value_note)}</span>` : ""}</div>
+    <div class="via">Gevonden via: ${esc(c.via)}</div></div>`;
+}
+/** Voorbeeld (transactie en loten), status in de positietabel en de aandachtspunten bijwerken. */
+function updateExchanges() {
+  const r = pendingImport; if (!r) return;
+  const owner = $("#imp-owner").value.trim() || DEFAULT_OWNER;
+  const dups = r.exch.length ? importDupFlags(r) : [];
+  r.exch.forEach((e, i) => {
+    const box = $(`.exch[data-x="${i}"]`); if (!box) return;
+    box.classList.toggle("off", !e.accept);
+    let html, lots = "";
+    try {
+      const t = exchangeTx(e, owner);
+      html = `<div class="alert ok"><strong>Omruiling (fusie/overname)</strong> · ${esc(t.trade_date)}<br>${esc(t.asset)} → ` +
+        t.components.map(c => `${num(c.quantity)} ${esc(c.asset)}`).join(" + ") + (D(t.price).gt(0) ? ` + ${esc(t.currency)} ${num(D(t.price).round(6).toString())} cash per stuk` : "") +
+        `<br><span class="small">Volledige positie (${num(e.x.quantity)} st.).${t.trade_date < "2026-01-01" ? " Geen belastbaar moment (vóór 2026)." : " Vanaf 2026: de cash telt als verkoop."}</span></div>`;
+      const fresh = r.transactions.filter((x, k) => !dups[k] && !(e.cashOn && x.import_id === t.cash_import_id));
+      const all = [...state.transactions.filter(x => x.owner === owner), ...fresh.map(x => ({ ...x, owner }))].concat([{ ...t }]);
+      const cfg = { ...defaultConfig(), fifoScope: state.settings.fifo_scope };
+      const got = window.MWB.lotsAt(all, {}, cfg, t.trade_date).filter(l => t.components.some(c => c.asset === l.asset) && l.acquired <= t.trade_date);
+      const split = got.some(l => l.unit_cost_eur);
+      lots = got.length ? `<div class="table-wrap"><table><thead><tr><th>Effect</th><th>Aankoop</th><th class="num">Aantal</th><th class="num">Hist. prijs/st.</th></tr></thead><tbody>` +
+        got.map(l => `<tr><td>${esc(l.asset)}</td><td>${esc(l.acquired)}</td><td class="num">${num(l.quantity.round(6).toString())}</td>
+          <td class="num">${l.unit_cost_eur ? eur(l.unit_cost_eur.toFixed(2)) : `<span class="muted">niet verdeeld</span>`}</td></tr>`).join("") + `</tbody></table></div>` +
+        `<p class="hint">${split ? "De aankoopprijs is verdeeld volgens de waarde op de ruildatum (eigen interpretatie, te bevestigen)."
+          : "Zonder waarde per stuk voor elk nieuw effect wordt de aankoopprijs niet verdeeld: geen hogere historische prijs mogelijk."}</p>`
+        : `<p class="hint">Geen aankopen van ${esc(e.x.asset)} gevonden vóór de ruildatum.</p>`;
+    } catch (err) { html = `<div class="alert warn">${esc(err.message)}</div>`; }
+    $(".exch-tx", box).innerHTML = html; $(".exch-lots", box).innerHTML = lots;
+    const tr = [...$$("#imp-positions tbody tr[data-i]")].find(x => r.positions[Number(x.dataset.i)].asset === e.x.asset);
+    if (tr) {
+      const on = exchAccepted(e), keep = $("[name=keep]", tr);
+      keep.disabled = on; if (on) keep.checked = false;
+      $(".exch-state", tr).innerHTML = on ? `<br><span class="pos">omgeruild op ${esc(e.x.date)}: wordt uitgeboekt (zie voorstel hieronder)</span>`
+        : `<br><span class="neg">waarschijnlijk niet meer in bezit · mogelijk omgeruild (zie voorstel hieronder)</span>`;
+    }
+  });
+  // aandachtspunten: wat een bevestigde omruiling oplost, doorstrepen
+  const on = r.exch.filter(exchAccepted);
+  const done = new Set(on.flatMap(e => e.x.resolves.warnings));
+  const solved = new Set(on.flatMap(e => e.comps.filter(c => c.on).map(c => c.asset)));
+  const short = r.incomplete?.length ? window.BOLERO.shortWarning(r.period, r.incomplete) : null;
+  const left = (r.incomplete || []).filter(a => !solved.has(a));
+  const items = r.warnings.map(w => w === short && left.length < r.incomplete.length
+    ? (left.length ? { text: window.BOLERO.shortWarning(r.period, left), done: false } : { text: w, done: true })
+    : { text: w, done: done.has(w) });
+  for (const e of on) if (e.cashOn) items.push({ text: `${e.x.cash.date} ${e.x.asset}: betaling van ${e.x.cash.currency} ${num(e.x.cash.amount)} telt niet als dividend maar als cash van de omruiling.`, done: false, info: true });
+  $("#imp-warnings").innerHTML = items.map(w => `<li class="${w.done ? "done" : ""}">${esc(w.text)}${w.done ? ` <span class="badge ok">opgelost</span>` : ""}</li>`).join("");
+  $("#imp-warn-wrap").hidden = !items.length;
+  $("#imp-warn-count").textContent = items.filter(w => !w.done && !w.info).length + (items.some(w => w.done) ? ` open, ${items.filter(w => w.done).length} opgelost` : "");
+}
+$("#imp-exch").addEventListener("input", e => {
+  const box = e.target.closest(".exch[data-x]"); if (!box) return;
+  const x = pendingImport.exch[Number(box.dataset.x)], row = e.target.closest("[data-c]");
+  if (row && e.target.dataset.k && e.target.type !== "checkbox") {
+    const c = x.comps[Number(row.dataset.c)]; c[e.target.dataset.k] = e.target.value.trim();
+    if (e.target.dataset.k === "quantity") $(".ratio", row).textContent = (() => { try { return num(D(c.quantity).div(D(x.x.quantity)).round(6).toString()); } catch { return "–"; } })();
+  }
+  updateExchanges();
+});
+$("#imp-exch").addEventListener("change", e => {
+  const box = e.target.closest(".exch[data-x]"); if (!box) return;
+  const x = pendingImport.exch[Number(box.dataset.x)], row = e.target.closest("[data-c]");
+  if (row && e.target.dataset.k === "on") x.comps[Number(row.dataset.c)].on = e.target.checked;
+  if (e.target.matches("[data-exch-cash]")) x.cashOn = e.target.checked;
+  if (e.target.matches("[data-exch-accept]")) x.accept = e.target.checked;
+  updateExchanges();
+});
+$("#imp-exch").addEventListener("click", e => {
+  if (!e.target.closest("[data-exch-add]")) return;
+  const box = e.target.closest(".exch[data-x]"), x = pendingImport.exch[Number(box.dataset.x)];
+  x.comps.push({ asset: "", quantity: "", value: "", value_note: "", via: "zelf toegevoegd", manual: true, on: true });
+  $(".comps", box).insertAdjacentHTML("beforeend", exchCompHtml(x, x.comps[x.comps.length - 1], x.comps.length - 1));
+  updateExchanges();
+});
+$("#imp-owner").addEventListener("input", () => updateExchanges());
 $("#imp-delist").addEventListener("change", e => {
   const tr = e.target.closest("tr[data-d]"); if (!tr) return;
   const buyout = $("[name=mode]", tr).value === "UITKOOP";
@@ -1531,11 +1668,19 @@ $("#imp-confirm").addEventListener("click", () => {
       return { d, add: $("[name=add]", tr).checked, mode,
         price: mode === "UITKOOP" && $("[name=add]", tr).checked ? dec($("[name=price]", tr).value, `uitkoopprijs voor ${d.name}`, { required: true, nonNegative: true }) : null };
     });
+    const exch = (r.exch || []).filter(exchAccepted).map(e => ({ e, t: exchangeTx(e, owner) }));
     const moved = moveAssetKeys(r.keyMoves);
-    const dupFlags = window.BOLERO.duplicateFlags(state.transactions, r.transactions);
+    const dupFlags = importDupFlags(r);
+    const absorbed = new Set(exch.map(({ t }) => t.cash_import_id).filter(Boolean));
     let added = 0;
+    // omruilingen eerst: op dezelfde dag vóór de verkoop van een nieuw effect
+    for (const { t } of exch) {
+      state.transactions.push({ ...t, id: state.nextId++ });
+      for (const c of t.components) state.assets[c.asset] ??= { name: "", asset_type: "aandeel", currency: t.currency, ref_value_eur: null, ref_source: "" };
+      added++;
+    }
     for (const [i, t] of r.transactions.entries()) {
-      if (dupFlags[i]) continue;
+      if (dupFlags[i] || absorbed.has(t.import_id)) continue;
       state.transactions.push({ ...t, owner, id: state.nextId++ });
       added++;
     }
@@ -1556,7 +1701,15 @@ $("#imp-confirm").addEventListener("click", () => {
       added++;
     }
     let cashAdded = 0;
-    if ($("#imp-cash-add").checked) for (const c of GELD.fresh(state.cash, r.cash)) { state.cash.push({ ...c, owner, id: state.nextId++ }); cashAdded++; }
+    const doneCash = new Set(exch.flatMap(({ e }) => e.x.resolves.cash));
+    const extraCash = exch.filter(({ e }) => e.cashOn).map(({ e }) => ({ kind: "CA", date: e.x.cash.date, amount: e.x.cash.amount, currency: e.x.cash.currency,
+      asset_name: e.x.asset, description: e.x.cash.description, status: "verwerkt", remark: "cash bij omruiling (zie de transactie Omruiling)",
+      owner, broker: "Bolero", import_id: "c" + e.x.cash.import_id, import_source: e.x.cash.source }));
+    if ($("#imp-cash-add").checked) for (const c of GELD.fresh(state.cash, [...r.cash, ...extraCash])) {
+      const done = doneCash.has(c.import_id);
+      state.cash.push({ ...c, ...(done ? { status: "verwerkt", remark: "verwerkt in de omruiling", warn: undefined } : {}), owner, id: state.nextId++ });
+      cashAdded++;
+    }
     for (const t of r.transactions) if (t.type === "DIVIDEND")
       state.assets[t.asset] ??= { name: "", asset_type: "aandeel", currency: t.currency, ref_value_eur: null, ref_source: "" };
     for (const { p, keep, ref } of decisions) {
@@ -1566,7 +1719,7 @@ $("#imp-confirm").addEventListener("click", () => {
         Object.assign(a, ref);
       }
       const corrId = `corr:${owner}:${p.asset}`;
-      if (!keep && !state.transactions.some(t => t.import_id === corrId)) {
+      if (!keep && !exch.some(({ t }) => t.asset === p.asset) && !exchangedBefore(p.asset) && !state.transactions.some(t => t.import_id === corrId)) {
         state.transactions.push({ id: state.nextId++, type: "SELL", trade_date: "2025-12-31", asset: p.asset, quantity: p.quantity, price: "0",
           currency: "EUR", fx_per_eur: "1", fees: "0", taxes: "0", owner, broker: "Bolero", historic_proven: false, cost_known: true,
           reynders_eur: "0", amount: "0", split_ratio: null, import_id: corrId,

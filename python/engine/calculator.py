@@ -303,7 +303,7 @@ def _finish_sale(sale: SaleResult) -> SaleResult:
 
 # ---------------------------------------------------------------- omruiling (fusie, overname met ruil in aandelen)
 
-def _exchange_weights(tx: Transaction) -> Optional[tuple[list[Decimal], Decimal]]:
+def _exchange_weights(tx: Transaction, ratio_of) -> Optional[tuple[list[Decimal], Decimal]]:
     """Verdeling van de aanschaffingswaarde over de nieuwe effecten en de cash (opleg), volgens hun waarde op de
     ruildatum. Eén nieuw effect zonder cash: alles gaat over. Anders zijn alle waarden nodig; zonder -> None."""
     comps, cash = tx.components, tx.price
@@ -311,7 +311,7 @@ def _exchange_weights(tx: Transaction) -> Optional[tuple[list[Decimal], Decimal]
         return [Decimal(1)], ZERO
     if any(not c.value for c in comps):
         return None
-    parts = [c.ratio * c.value for c in comps]
+    parts = [ratio_of(c) * c.value for c in comps]
     total = sum(parts, ZERO) + cash
     if total <= 0:
         return None
@@ -334,19 +334,13 @@ def _process_exchange(tx: Transaction, pool: list[Lot], pools, ref_values: Mappi
             raise ValueError(f"Omruiling: naam van het nieuwe effect ontbreekt ({tx.source})")
         if c.asset == tx.asset:
             raise ValueError(f"Omruiling: het nieuwe effect moet verschillen van {tx.asset} ({tx.source})")
-        if c.ratio <= 0:
+        if (c.quantity if c.quantity else c.ratio) <= 0:
             raise ValueError(f"Omruiling: ratio voor {c.asset} moet groter dan 0 zijn ({tx.source})")
         if c.value is not None and c.value < 0:
             raise ValueError(f"Omruiling: waarde van {c.asset} mag niet negatief zijn ({tx.source})")
     if tx.price < 0:
         raise ValueError(f"Omruiling: cash per stuk mag niet negatief zijn ({tx.source})")
     late = tx.trade_date >= cfg.start_date
-    w = _exchange_weights(tx)
-    if w is None and late:
-        raise ValueError(
-            f"Omruiling van {tx.asset} op {tx.trade_date}: vul voor elk nieuw effect de waarde per stuk "
-            "op de ruildatum in (nodig om de aanschaffingswaarde te verdelen over de nieuwe effecten en de cash)."
-        )
     held = sum((l.quantity for l in pool), ZERO)
     qty = min(tx.quantity, held) if tx.quantity > 0 else held
     event = Event(tx.trade_date, tx.owner, tx.broker, tx.asset, TxType.RUIL.value, held, "", tx.source,
@@ -355,6 +349,16 @@ def _process_exchange(tx: Transaction, pool: list[Lot], pools, ref_values: Mappi
     if qty <= 0:
         event.note = event.warning = "Omruiling geregistreerd, maar er zijn geen stuks in bezit: niets omgeruild."
         return next_id
+
+    def ratio_of(c: ExchangeComponent) -> Decimal:  # nieuwe stuks per oud stuk
+        return c.quantity / qty if c.quantity else c.ratio
+
+    w = _exchange_weights(tx, ratio_of)
+    if w is None and late:
+        raise ValueError(
+            f"Omruiling van {tx.asset} op {tx.trade_date}: vul voor elk nieuw effect de waarde per stuk "
+            "op de ruildatum in (nodig om de aanschaffingswaarde te verdelen over de nieuwe effecten en de cash)."
+        )
 
     parts: list[tuple[Lot, Decimal]] = []
     remaining = qty
@@ -377,25 +381,35 @@ def _process_exchange(tx: Transaction, pool: list[Lot], pools, ref_values: Mappi
     # nieuwe loten: zelfde verwervingsdatum, aanschaffingswaarde verdeeld volgens de waarde op de ruildatum
     for i, c in enumerate(comps):
         f = w[0][i] if w else None
+        r = ratio_of(c)
         target = pools[_pool_key(replace(tx, asset=c.asset), cfg.fifo_scope)]
-        for lot, q in parts:
-            n = q * c.ratio
+        given = ZERO
+        for j, (lot, q) in enumerate(parts):
+            # totaal ontvangen aantal: evenredig over de loten, het laatste lot krijgt de rest (som exact)
+            if not c.quantity:
+                n = q * c.ratio
+            elif j == len(parts) - 1:
+                n = c.quantity - given
+            else:
+                n = c.quantity * q / qty
+            given += n
             unit_ref = None
             if lot.pre_2026:
                 if not late:
                     if c.asset in ref_values and ref_values[c.asset] not in (None, ""):
                         unit_ref = Decimal(ref_values[c.asset])
                 else:
-                    unit_ref = lot.unit_ref_eur * f / c.ratio
+                    unit_ref = lot.unit_ref_eur * f / r
             target.append(Lot(
                 lot_id=next_id, owner=lot.owner, broker=lot.broker, asset=c.asset, acquired=lot.acquired,
-                quantity=n, orig_quantity=n, unit_cost_eur=lot.unit_cost_eur * f / c.ratio if f is not None else ZERO,
+                quantity=n, orig_quantity=n, unit_cost_eur=lot.unit_cost_eur * f / r if f is not None else ZERO,
                 historic_proven=lot.historic_proven, cost_known=lot.cost_known and f is not None,
                 source=tx.source, unit_ref_eur=unit_ref,
             ))
             next_id += 1
 
-    per = " + ".join(f"{_fmt(c.ratio)} {c.asset}" for c in comps) + (
+    per = " + ".join(f"{c.asset} ({_fmt(c.quantity)} st. in totaal)" if c.quantity else f"{_fmt(c.ratio)} {c.asset}"
+                     for c in comps) + (
         f" + {_fmt(tx.price)} {tx.currency} cash" if tx.price > 0 else "")
     if not late:
         if w:
