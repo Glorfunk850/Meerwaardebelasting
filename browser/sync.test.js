@@ -19,6 +19,15 @@ test("koppelcode: 32 tekens heen en terug, ook slordig getypt", () => {
   assert.equal(S.codeBytes("U".repeat(32)), null); // U zit niet in het alfabet
 });
 
+test("code uit een gescande QR-code: link of code, iets anders niet", () => {
+  const code = S.nieuweCode();
+  assert.equal(S.codeUitQr(`https://voorbeeld.github.io/app/browser/#koppelen=${code}`), code);
+  assert.equal(S.codeUitQr(`https://voorbeeld.github.io/app/#koppelen=${code}&server=x`), code);
+  assert.equal(S.codeUitQr(S.codeNetjes(code)), code);
+  assert.equal(S.codeUitQr("https://voorbeeld.be/"), null);
+  assert.equal(S.codeUitQr(""), null);
+});
+
 test("sleutels: vast per code, eigen ruimte per code", async () => {
   const code = S.nieuweCode();
   const a = await S.sleutels(code), b = await S.sleutels(S.codeNetjes(code)), c = await S.sleutels(S.nieuweCode());

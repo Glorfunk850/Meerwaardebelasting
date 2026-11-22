@@ -158,8 +158,15 @@
     for (const c of uit.cash || []) c.id = maakId();
     return uit;
   }
+  /** Koppelcode uit de tekst van een gescande QR-code: de link (…#koppelen=<code>) of alleen de code; anders null. */
+  function codeUitQr(tekst) {
+    const t = String(tekst || "").trim();
+    const i = t.indexOf("#koppelen=");
+    const code = i >= 0 ? new URLSearchParams(t.slice(i + 1)).get("koppelen") || "" : t;
+    return codeBytes(code) ? naarCode(codeBytes(code)) : null;
+  }
   const telling = s => ({ transacties: (s?.transactions || []).length, geldbewegingen: (s?.cash || []).length });
 
-  const api = { naarCode, codeBytes, nieuweCode, codeNetjes, sleutels, versleutelen, ontsleutelen, gelijk, samenvoegen, nieuwId, nieuweIds, telling };
+  const api = { naarCode, codeBytes, nieuweCode, codeNetjes, sleutels, versleutelen, ontsleutelen, gelijk, samenvoegen, nieuwId, nieuweIds, codeUitQr, telling };
   if (node) module.exports = api; else root.SYNC = api;
 })(typeof window !== "undefined" ? window : globalThis);

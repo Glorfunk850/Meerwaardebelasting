@@ -20,6 +20,7 @@ De versie die op je claude.ai-link draait. Alles werkt in de browser; er is geen
 | `simulatie.js` | Simulatie: impact van een fictieve verkoop (rekent met en zonder via de rekenkern, vergelijkt per jaar; bewaart niets) |
 | `sync.js` | Synchroniseren tussen toestellen in de app op GitHub Pages: koppelcode, versleuteling (AES-256-GCM), drie-weg samenvoegen |
 | `qrcode.js` | QR-codegenerator (Kazuhiko Arase, MIT-licentie), enkel geladen om de koppelcode als QR-code te tonen |
+| `jsQR.js` | QR-lezer (jsQR, Apache-2.0-licentie, zie `LICENSE-jsQR`), enkel geladen bij *QR-code scannen* als de browser geen `BarcodeDetector` heeft |
 | `pdf.js` | Rapport als PDF (minimale PDF-generator zonder externe bibliotheek, Helvetica met WinAnsi-tekens) |
 | `build.py` | Voegt alles samen tot `index.html` |
 | `manifest.webmanifest`, `sw.js`, `icon*` | Installeerbare app (PWA) op GitHub Pages; niet gebruikt op claude.ai |
@@ -78,8 +79,9 @@ adres in `SYNC_SERVER` in `app.js`):
 - *Alle gegevens wissen* en *Back-up herstellen* gelden ook voor de gekoppelde toestellen.
 - Bewijsstukken worden niet gesynchroniseerd; zet ze over met *Back-up met bewijsstukken*.
 - Op claude.ai is dit paneel verborgen: daar synchroniseert het Claude-account al.
-- Een QR-code opent de link in de standaardbrowser. Op iPhone/iPad heeft de app op het beginscherm een eigen opslag,
-  los van Safari: typ de code daar in de app zelf.
+- Koppelen kan met *QR-code scannen* in de app zelf (camera; `BarcodeDetector` of anders `jsQR.js`) of door de code te
+  typen. Scan niet met de gewone camera-app: die opent de link in de standaardbrowser, en op iPhone/iPad heeft de app op
+  het beginscherm een eigen opslag, los van Safari. Gebeurt dat toch, dan waarschuwt de pagina in Safari.
 
 ## Bewijsstukken
 

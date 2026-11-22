@@ -337,6 +337,7 @@ function renderSync() {
     body.innerHTML = `<p class="hint">Houd je transacties, activa en instellingen gelijk op je telefoon, tablet en laptop, zoals bij DuckDuckGo: zonder account of wachtwoord, met een geheime code. Alles wordt op het toestel zelf versleuteld; de server kan je gegevens niet lezen. Bewijsstukken worden niet gesynchroniseerd (zet ze over met de back-up met bewijsstukken).</p>
       <div class="row">
         <button class="btn primary" data-sync="enable">Synchronisatie aanzetten</button>
+        <button class="btn" data-sync="scan">QR-code scannen</button>
         <button class="btn" data-sync="code">Koppelen met een code</button>
       </div>
       <form id="sync-code-form" class="inline-form" ${sync.codeForm ? "" : "hidden"} style="margin-top:.6rem">
@@ -349,10 +350,10 @@ function renderSync() {
   const status = sync.busy ? "Bezig met synchroniseren…" : z.error ? `${z.offline ? "Even niet gesynchroniseerd" : "Synchroniseren lukte niet"}: ${z.error}` : z.last ? `Aan. Laatst gesynchroniseerd: ${whenText(z.last)}.` : "Aan.";
   body.innerHTML = `<p class="${z.error && !sync.busy ? "" : "hint"}" role="status">${esc(status)}</p>
     ${sync.showCode ? `<div class="sync-code">
-        <p class="small">Scan deze QR-code met de camera van je andere toestel, of typ daar bij <em>Koppelen met een code</em> deze code:</p>
+        <p class="small">Open de app op je andere toestel en kies daar bij Instellingen <em>QR-code scannen</em>, of typ er bij <em>Koppelen met een code</em> deze code:</p>
         <div class="sync-qr" id="sync-qr"></div>
         <div class="sync-tekst">${esc(SYNC.codeNetjes(z.code))}</div>
-        <p class="hint">Staat de app op je iPhone of iPad op het beginscherm, typ de code dan in de app zelf: de QR-code opent Safari, en dat heeft een eigen opslag.</p>
+        <p class="hint">Scan in de app zelf, niet met de gewone camera-app: die opent de link in de browser, en op een iPhone of iPad heeft de app op het beginscherm een andere opslag dan Safari.</p>
         <p class="hint">Wie deze code heeft, kan je gegevens lezen en wijzigen. Deel ze met niemand.</p>
         <button class="btn small ghost" data-sync="hide">Code verbergen</button>
       </div>` : ""}
@@ -379,6 +380,7 @@ $("#sync-panel").addEventListener("click", async e => {
   try {
     if (act === "enable") { toast("Synchronisatie aanzetten…"); await syncEnable(); toast("Synchronisatie staat aan. Koppel nu je andere toestel."); }
     else if (act === "code") sync.codeForm = true;
+    else if (act === "scan") { const code = await scanQr(); if (code) await syncPreview(code); }
     else if (act === "replace" || act === "merge") { await syncLink(act === "merge" ? "samenvoegen" : "vervangen"); toast("Gekoppeld. Dit toestel synchroniseert nu mee."); }
     else if (act === "cancel") sync.proposal = null;
     else if (act === "show") sync.showCode = true;
@@ -406,6 +408,86 @@ $("#sync-panel").addEventListener("submit", async e => {
   finally { btn.disabled = false; }
 });
 
+// QR-code van een ander toestel scannen met de camera, in de app zelf (zoals in Voorraadbeheer).
+// BarcodeDetector als de browser het heeft (Chrome op Android), anders jsQR (jsQR.js, Apache-2.0-licentie).
+let jsqrPromise = null;
+const jsqrLoad = () => jsqrPromise || (jsqrPromise = new Promise((ok, no) => {
+  if (window.jsQR) return ok(window.jsQR);
+  const s = document.createElement("script");
+  s.src = "jsQR.js";
+  s.onload = () => ok(window.jsQR);
+  s.onerror = () => { jsqrPromise = null; no(new Error("laden")); };
+  document.head.appendChild(s);
+}));
+/** Opent de camera en geeft de gescande koppelcode terug, of null (geannuleerd). */
+function scanQr() {
+  return new Promise(resolve => {
+    const dlg = $("#scan-dialog"), video = $("video", dlg), status = $("#scan-status");
+    let stream = null, done = false, timer = null, wrong = false;
+    const finish = (code, error) => {
+      if (done) return;
+      done = true; clearTimeout(timer);
+      if (stream) stream.getTracks().forEach(t => t.stop());
+      video.srcObject = null;
+      if (dlg.open) dlg.close();
+      if (error) toast(error, true);
+      resolve(code || null);
+    };
+    $("#scan-cancel").onclick = () => finish(null);
+    dlg.oncancel = e => { e.preventDefault(); finish(null); };
+    status.textContent = "Camera openen…";
+    dlg.showModal();
+    (async () => {
+      if (!navigator.mediaDevices?.getUserMedia) return finish(null, "Deze browser kan de camera niet gebruiken. Typ de code met ‘Koppelen met een code’.");
+      try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false }); }
+      catch (e) {
+        const denied = e && (e.name === "NotAllowedError" || e.name === "SecurityError");
+        return finish(null, denied ? "De app mag de camera niet gebruiken. Geef toestemming in de instellingen van je browser, of typ de code met ‘Koppelen met een code’."
+          : "De camera kon niet geopend worden. Typ de code met ‘Koppelen met een code’.");
+      }
+      if (done) { stream.getTracks().forEach(t => t.stop()); return; }
+      video.srcObject = stream;
+      try { await video.play(); } catch { /* begint vanzelf */ }
+      let read = null;
+      try {
+        if ("BarcodeDetector" in window && (await window.BarcodeDetector.getSupportedFormats()).includes("qr_code")) {
+          const d = new window.BarcodeDetector({ formats: ["qr_code"] });
+          read = async () => ((await d.detect(video))[0] || {}).rawValue || null;
+        }
+      } catch { read = null; }
+      if (!read) {
+        let jsQR;
+        try { jsQR = await jsqrLoad(); } catch { return finish(null, "De QR-lezer kon niet geladen worden. Typ de code met ‘Koppelen met een code’."); }
+        const canvas = document.createElement("canvas"), cx = canvas.getContext("2d", { willReadFrequently: true });
+        read = async () => {
+          const w = video.videoWidth, h = video.videoHeight;
+          if (!w || !h) return null;
+          const f = Math.min(1, 720 / Math.max(w, h));
+          canvas.width = Math.round(w * f); canvas.height = Math.round(h * f);
+          cx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const r = jsQR(cx.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height, { inversionAttempts: "attemptBoth" });
+          return r ? r.data : null;
+        };
+      }
+      if (done) return;
+      status.textContent = "Zoeken naar een QR-code…";
+      const look = async () => {
+        if (done) return;
+        let text = null;
+        try { text = await read(); } catch { /* volgend beeld */ }
+        if (done) return;
+        if (text) {
+          const code = SYNC.codeUitQr(text);
+          if (code) return finish(code);
+          if (!wrong) { wrong = true; status.textContent = "Dit is geen koppelcode van deze tool. Scan de QR-code bij Instellingen → Synchroniseren → Toestel koppelen op je andere toestel."; }
+        }
+        timer = setTimeout(look, 200);
+      };
+      look();
+    })();
+  });
+}
+
 async function initSync() {
   if (!syncAvailable()) return;
   // gescande QR-code van een ander toestel: #koppelen=<code> (altijd met de eigen server, nooit een adres uit de link)
@@ -413,6 +495,10 @@ async function initSync() {
     const q = new URLSearchParams(location.hash.slice(1));
     history.replaceState(null, "", location.pathname + location.search + "#instellingen");
     sync.hashLink = { code: q.get("koppelen") };
+    // op een iPhone/iPad opent een met de camera-app gescande link Safari, niet de app op het beginscherm
+    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
+    if (ios && !standalone) sync.hashLink.safari = true;
   }
   const z = syncLoadStored();
   if (z && z.code && z.server) { try { await syncStart(z); } catch { /* ongeldige koppeling: uit */ } }
@@ -422,7 +508,9 @@ async function initSync() {
     render();
     if (syncOn() && SYNC.naarCode(SYNC.codeBytes(l.code) || []) === sync.z.code) toast("Dit toestel is al gekoppeld.");
     else if (syncOn()) toast("Dit toestel synchroniseert al met een andere code. Stop eerst de synchronisatie bij Instellingen.", true);
-    else { try { await syncPreview(l.code); renderSync(); } catch (err) { toast(err.message || "Koppelen lukte niet.", true); } }
+    else {
+      if (l.safari) toast("Let op: dit is Safari, niet de app op je beginscherm (die heeft een eigen opslag). Wil je de app koppelen, open ze dan en kies QR-code scannen.", true);
+      try { await syncPreview(l.code); renderSync(); } catch (err) { toast(err.message || "Koppelen lukte niet.", true); } }
   }
   if (syncOn()) syncPlan(300);
   // opnieuw bij het openen van de app, als het internet terug is, en elke halve minuut zolang ze open staat
