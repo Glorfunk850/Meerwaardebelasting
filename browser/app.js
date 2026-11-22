@@ -119,6 +119,7 @@ async function readStoredJson(d) {
 function persist() {
   const json = JSON.stringify(state);
   lsSet(json);
+  syncPlan();
   if (!storage.ref) return;
   storage.pending = json;
   flush();
@@ -144,6 +145,295 @@ async function flush() {
 }
 function commit() { persist(); render(); }
 
+// ================================================================ synchroniseren tussen toestellen (sync.js)
+// Enkel buiten claude.ai (de installeerbare app op GitHub Pages): op claude.ai synchroniseert het Claude-account al.
+// Versleuteld op het toestel met de koppelcode; de server (dezelfde als Voorraadbeheer) ziet alleen onleesbare bytes.
+// De koppeling (code, server, laatst gedeelde versie) staat alleen op dit toestel, in localStorage.
+const SYNC = window.SYNC;
+const SYNC_KEY = "meerwaarde-sync-v1";
+const SYNC_SERVER = "https://voorraad-sync.chug-erratic-roman.workers.dev"; // eigen Cloudflare Worker (zie README)
+const sync = { z: null, k: null, timer: null, chain: Promise.resolve(), busy: false, proposal: null, showCode: false, codeForm: false, hashLink: null };
+const syncAvailable = () => !window.claude && typeof crypto !== "undefined" && !!crypto.subtle;
+const syncOn = () => !!(sync.z && sync.k);
+function newId() { return SYNC.nieuwId(state, syncOn()); }
+const deepCopy = x => JSON.parse(JSON.stringify(x));
+
+function syncSave() {
+  try {
+    if (sync.z) localStorage.setItem(SYNC_KEY, JSON.stringify(sync.z)); else localStorage.removeItem(SYNC_KEY);
+  } catch { /* geen opslag: de koppeling geldt dan tot de pagina sluit */ }
+}
+function syncLoadStored() { try { return JSON.parse(localStorage.getItem(SYNC_KEY) || "null"); } catch { return null; } }
+const serverNeat = a => { let t = String(a || "").trim().replace(/\/+$/, ""); if (t && !/^https?:\/\//i.test(t)) t = "https://" + t; return t; };
+
+async function syncServer(server, k, method, { version = 0, fresh = false, body } = {}) {
+  const h = {};
+  if (method !== "GET") h.Authorization = "Bearer " + k.token;
+  if (method === "GET" && version) h["If-None-Match"] = `"${version}"`;
+  if (method === "PUT") { h["Content-Type"] = "application/octet-stream"; if (fresh) h["If-None-Match"] = "*"; else h["If-Match"] = `"${version}"`; }
+  const stop = new AbortController(), clock = setTimeout(() => stop.abort(), 30000);
+  let r;
+  try { r = await fetch(`${server}/r/${k.ruimte}`, { method, headers: h, body, cache: "no-store", signal: stop.signal }); }
+  catch { throw Object.assign(new Error(navigator.onLine ? "De synchronisatieserver is niet bereikbaar." : "Geen internet."), { network: true }); }
+  finally { clearTimeout(clock); }
+  const et = r.headers.get("ETag");
+  return { status: r.status, version: et ? +et.replace(/\D/g, "") : 0, r };
+}
+async function syncCheckServer(server) {
+  if (!/^https:\/\/[^/\s]+\.[^/\s]+|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(server)) throw new Error("Dit is geen geldig adres van een synchronisatieserver.");
+  let t = "";
+  try { t = await (await fetch(server + "/", { cache: "no-store" })).text(); }
+  catch { throw new Error(navigator.onLine ? `${server} is niet bereikbaar.` : "Geen internet."); }
+  if (!/synchronisatieserver/i.test(t)) throw new Error(`Op ${server} staat geen synchronisatieserver.`);
+}
+/** Samengevoegde of overgenomen toestand in gebruik nemen (zonder zelf een nieuwe synchronisatie te plannen). */
+function syncAdopt(s) {
+  if (!validState(s)) throw new Error("De gegevens op de server hebben niet de vorm van deze tool.");
+  state = s;
+  migrateToNames();
+  lsSet(JSON.stringify(state));
+  render();
+}
+
+/** Eén ronde: ophalen, samenvoegen, versturen. Bij een botsing (ander toestel was sneller) opnieuw. */
+async function syncRound() {
+  if (!syncOn()) return;
+  // een ander venster van de app kan intussen gesynchroniseerd of gestopt hebben
+  const stored = syncLoadStored();
+  if (!stored && sync.z.version) { sync.z = null; sync.k = null; renderSync(); return; }
+  if (stored && stored.code === sync.z.code && (stored.version || 0) > (sync.z.version || 0)) Object.assign(sync.z, stored);
+  const z = sync.z, k = sync.k;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const a = await syncServer(z.server, k, "GET", { version: z.version });
+    if (sync.z !== z) return; // intussen gestopt
+    let remote, version;
+    if (a.status === 304) { remote = z.basis; version = z.version; }
+    else if (a.status === 200) { remote = await SYNC.ontsleutelen(await a.r.arrayBuffer(), k); version = a.version; }
+    else if (a.status === 404 && z.version) {
+      await syncStop();
+      toast("De synchronisatie is gestopt: de gegevens werden op een ander toestel van de server gewist. Je gegevens op dit toestel blijven staan.", true);
+      return;
+    } else if (a.status === 404) { remote = null; version = 0; }
+    else throw new Error(`De synchronisatieserver gaf een fout (${a.status}).`);
+    if (sync.z !== z) return;
+
+    if (remote) {
+      const local = deepCopy(state);
+      const merged = SYNC.samenvoegen(z.basis, local, remote);
+      if (!SYNC.gelijk(merged, local)) syncAdopt(merged);
+    }
+    z.basis = remote; z.version = version; syncSave();
+    const together = deepCopy(state);
+    if (remote && SYNC.gelijk(together, remote)) { z.last = new Date().toISOString(); z.error = null; syncSave(); return; }
+    const b = await syncServer(z.server, k, "PUT", { version, fresh: !remote, body: await SYNC.versleutelen(together, k) });
+    if (sync.z !== z) return;
+    if (b.status === 200) { z.basis = together; z.version = b.version; z.last = new Date().toISOString(); z.error = null; syncSave(); return; }
+    if (b.status === 412) continue; // een ander toestel bewaarde intussen iets: opnieuw ophalen en samenvoegen
+    if (b.status === 401) throw new Error("De server weigert de wijzigingen. Koppel dit toestel opnieuw.");
+    if (b.status === 413) throw new Error("Je gegevens zijn te groot voor de synchronisatieserver.");
+    throw new Error(`De synchronisatieserver gaf een fout (${b.status}).`);
+  }
+  throw new Error("Synchroniseren lukte niet: de gegevens veranderden steeds opnieuw. Probeer het zo nog eens.");
+}
+function syncNow() {
+  clearTimeout(sync.timer); sync.timer = null;
+  if (!syncOn()) return Promise.resolve();
+  const r = sync.chain.then(async () => {
+    if (!syncOn()) return;
+    sync.busy = true; renderSync();
+    try { await syncRound(); } catch (e) {
+      if (sync.z) { sync.z.error = e.message || "Synchroniseren lukte niet."; sync.z.offline = !!e.network; syncSave(); }
+      throw e;
+    } finally { sync.busy = false; renderSync(); }
+  });
+  sync.chain = r.catch(() => {});
+  return r;
+}
+function syncPlan(wait = 1500) {
+  if (!syncOn()) return;
+  clearTimeout(sync.timer);
+  sync.timer = setTimeout(() => syncNow().catch(() => {}), wait);
+}
+async function syncStart(z) { sync.k = await SYNC.sleutels(z.code); sync.z = z; syncSave(); }
+async function syncStop() { clearTimeout(sync.timer); sync.timer = null; sync.z = null; sync.k = null; syncSave(); renderSync(); }
+
+async function syncEnable() {
+  const server = serverNeat(SYNC_SERVER);
+  await syncCheckServer(server);
+  await syncStart({ server, code: SYNC.nieuweCode(), version: 0, basis: null, last: null, error: null });
+  sync.showCode = true;
+  try { await syncNow(); } catch (e) { await syncStop(); throw e; }
+}
+/** Stap 1 van koppelen: met de code ophalen wat er op de server staat. */
+async function syncPreview(code, server = SYNC_SERVER) {
+  server = serverNeat(server);
+  if (!SYNC.codeBytes(code)) throw new Error("Deze code klopt niet: ze heeft 32 tekens (cijfers en letters). Kijk ze nog eens na.");
+  await syncCheckServer(server);
+  const k = await SYNC.sleutels(code);
+  const a = await syncServer(server, k, "GET");
+  if (a.status === 404) throw new Error("Met deze code staat er niets op de server. Kijk de code nog eens na.");
+  if (a.status !== 200) throw new Error(`De synchronisatieserver gaf een fout (${a.status}).`);
+  const remote = await SYNC.ontsleutelen(await a.r.arrayBuffer(), k);
+  if (!validState(remote)) throw new Error("De gegevens op de server hebben niet de vorm van deze tool.");
+  sync.proposal = { server, code: SYNC.naarCode(SYNC.codeBytes(code)), version: a.version, remote };
+}
+/** Stap 2: koppelen. "vervangen": dit toestel neemt de gegevens van het andere over; "samenvoegen": beide houden. */
+async function syncLink(how) {
+  const p = sync.proposal; sync.proposal = null;
+  if (!p) return;
+  await syncStart({ server: p.server, code: p.code, version: p.version, basis: p.remote, last: null, error: null });
+  if (how === "samenvoegen") {
+    const ids = { nextId: state.nextId };
+    const own = SYNC.nieuweIds(state, () => SYNC.nieuwId(ids, true)); // eigen id's mogen niet botsen met die van de andere toestellen
+    syncAdopt(SYNC.samenvoegen(null, own, deepCopy(p.remote)));
+  } else syncAdopt(deepCopy(p.remote));
+  try { await syncNow(); } catch { /* staat in de status; volgende keer opnieuw */ }
+}
+async function syncWipe() {
+  if (!syncOn()) return;
+  const a = await syncServer(sync.z.server, sync.k, "DELETE");
+  if (a.status !== 204 && a.status !== 404) throw new Error(`Wissen lukte niet (fout ${a.status}).`);
+  await syncStop();
+}
+
+let qrPromise = null;
+const qrLoad = () => qrPromise || (qrPromise = new Promise((ok, no) => {
+  if (window.qrcode) return ok(window.qrcode);
+  const s = document.createElement("script");
+  s.src = "qrcode.js";
+  s.onload = () => ok(window.qrcode);
+  s.onerror = () => { qrPromise = null; no(new Error("QR-code kon niet geladen worden")); };
+  document.head.appendChild(s);
+}));
+function syncLinkUrl() {
+  return `${location.origin}${location.pathname}#koppelen=${SYNC.naarCode(SYNC.codeBytes(sync.z.code))}`;
+}
+const whenText = iso => {
+  const d = new Date(iso), s = (Date.now() - d) / 1000;
+  if (s < 60) return "net";
+  if (s < 3600) return `${Math.round(s / 60)} min. geleden`;
+  return d.toLocaleString("nl-BE", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+};
+const countText = c => `${c.transacties} ${c.transacties === 1 ? "transactie" : "transacties"}` + (c.geldbewegingen ? ` en ${c.geldbewegingen} ${c.geldbewegingen === 1 ? "geldbeweging" : "geldbewegingen"}` : "");
+
+function renderSync() {
+  renderStorageStatus();
+  const panel = $("#sync-panel"), body = $("#sync-body");
+  if (!panel || !syncAvailable()) return;
+  panel.hidden = false;
+  const p = sync.proposal;
+  if (p) {
+    const remote = SYNC.telling(p.remote), local = SYNC.telling(state), hasLocal = state.transactions.length + state.cash.length > 0;
+    body.innerHTML = `<p>Op het andere toestel: ${esc(countText(remote))}. Op dit toestel: ${esc(countText(local))}.</p>
+      <div class="row">
+        <button class="btn primary" data-sync="replace">Gegevens van het andere toestel overnemen</button>
+        ${hasLocal ? `<button class="btn" data-sync="merge">Samenvoegen (beide houden)</button>` : ""}
+        <button class="btn ghost" data-sync="cancel">Annuleren</button>
+      </div>
+      <p class="hint">${hasLocal ? "Overnemen vervangt wat nu op dit toestel staat. Kies samenvoegen alleen als op dit toestel transacties staan die het andere toestel niet heeft: wat op beide toestellen staat (bv. dezelfde import), komt er anders dubbel in." : "Dit toestel neemt alles van het andere over."}</p>`;
+    return;
+  }
+  if (!syncOn()) {
+    body.innerHTML = `<p class="hint">Houd je transacties, activa en instellingen gelijk op je telefoon, tablet en laptop, zoals bij DuckDuckGo: zonder account of wachtwoord, met een geheime code. Alles wordt op het toestel zelf versleuteld; de server kan je gegevens niet lezen. Bewijsstukken worden niet gesynchroniseerd (zet ze over met de back-up met bewijsstukken).</p>
+      <div class="row">
+        <button class="btn primary" data-sync="enable">Synchronisatie aanzetten</button>
+        <button class="btn" data-sync="code">Koppelen met een code</button>
+      </div>
+      <form id="sync-code-form" class="inline-form" ${sync.codeForm ? "" : "hidden"} style="margin-top:.6rem">
+        <input name="code" placeholder="Code van het andere toestel (32 tekens)" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Koppelcode" required>
+        <button class="btn primary">Verder</button>
+      </form>`;
+    return;
+  }
+  const z = sync.z;
+  const status = sync.busy ? "Bezig met synchroniseren…" : z.error ? `${z.offline ? "Even niet gesynchroniseerd" : "Synchroniseren lukte niet"}: ${z.error}` : z.last ? `Aan. Laatst gesynchroniseerd: ${whenText(z.last)}.` : "Aan.";
+  body.innerHTML = `<p class="${z.error && !sync.busy ? "" : "hint"}" role="status">${esc(status)}</p>
+    ${sync.showCode ? `<div class="sync-code">
+        <p class="small">Scan deze QR-code met de camera van je andere toestel, of typ daar bij <em>Koppelen met een code</em> deze code:</p>
+        <div class="sync-qr" id="sync-qr"></div>
+        <div class="sync-tekst">${esc(SYNC.codeNetjes(z.code))}</div>
+        <p class="hint">Staat de app op je iPhone of iPad op het beginscherm, typ de code dan in de app zelf: de QR-code opent Safari, en dat heeft een eigen opslag.</p>
+        <p class="hint">Wie deze code heeft, kan je gegevens lezen en wijzigen. Deel ze met niemand.</p>
+        <button class="btn small ghost" data-sync="hide">Code verbergen</button>
+      </div>` : ""}
+    <div class="row">
+      ${sync.showCode ? "" : `<button class="btn primary" data-sync="show">Toestel koppelen</button>`}
+      <button class="btn" data-sync="now">Nu synchroniseren</button>
+      <button class="btn ghost" data-sync="stop">Stoppen op dit toestel</button>
+      <button class="btn small danger" data-sync="wipe">Van de server wissen</button>
+    </div>`;
+  if (sync.showCode) qrLoad().then(qr => {
+    const el = $("#sync-qr");
+    if (!el || !syncOn()) return;
+    const q = qr(0, "M"); q.addData(syncLinkUrl()); q.make();
+    el.innerHTML = q.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+  }).catch(() => { const el = $("#sync-qr"); if (el) el.hidden = true; });
+}
+
+$("#sync-panel").addEventListener("click", async e => {
+  const b = e.target.closest("[data-sync]");
+  if (!b) return;
+  const act = b.dataset.sync;
+  const fail = err => toast(err && err.message ? err.message : "Dat lukte niet.", true);
+  b.disabled = true;
+  try {
+    if (act === "enable") { toast("Synchronisatie aanzetten…"); await syncEnable(); toast("Synchronisatie staat aan. Koppel nu je andere toestel."); }
+    else if (act === "code") sync.codeForm = true;
+    else if (act === "replace" || act === "merge") { await syncLink(act === "merge" ? "samenvoegen" : "vervangen"); toast("Gekoppeld. Dit toestel synchroniseert nu mee."); }
+    else if (act === "cancel") sync.proposal = null;
+    else if (act === "show") sync.showCode = true;
+    else if (act === "hide") sync.showCode = false;
+    else if (act === "now") { await syncNow(); toast("Gesynchroniseerd"); }
+    else if (act === "stop") {
+      if (!(await confirmDialog("Synchroniseren stoppen op dit toestel? Je gegevens blijven hier staan, en op de server voor je andere toestellen."))) return;
+      await syncStop(); toast("Synchronisatie gestopt op dit toestel");
+    } else if (act === "wipe") {
+      if (!(await confirmDialog("Je versleutelde gegevens van de server wissen? Al je gekoppelde toestellen stoppen dan met synchroniseren; de gegevens op elk toestel blijven staan."))) return;
+      await syncWipe(); toast("Van de server gewist");
+    }
+  } catch (err) { fail(err); }
+  finally {
+    b.disabled = false; renderSync();
+    if (act === "code") $("#sync-code-form [name=code]")?.focus();
+  }
+});
+$("#sync-panel").addEventListener("submit", async e => {
+  if (e.target.id !== "sync-code-form") return;
+  e.preventDefault();
+  const btn = $("button", e.target); btn.disabled = true;
+  try { await syncPreview(e.target.code.value); sync.codeForm = false; renderSync(); }
+  catch (err) { toast(err.message || "Dat lukte niet.", true); }
+  finally { btn.disabled = false; }
+});
+
+async function initSync() {
+  if (!syncAvailable()) return;
+  // gescande QR-code van een ander toestel: #koppelen=<code> (altijd met de eigen server, nooit een adres uit de link)
+  if (location.hash.startsWith("#koppelen=")) {
+    const q = new URLSearchParams(location.hash.slice(1));
+    history.replaceState(null, "", location.pathname + location.search + "#instellingen");
+    sync.hashLink = { code: q.get("koppelen") };
+  }
+  const z = syncLoadStored();
+  if (z && z.code && z.server) { try { await syncStart(z); } catch { /* ongeldige koppeling: uit */ } }
+  renderSync();
+  if (sync.hashLink) {
+    const l = sync.hashLink; sync.hashLink = null;
+    render();
+    if (syncOn() && SYNC.naarCode(SYNC.codeBytes(l.code) || []) === sync.z.code) toast("Dit toestel is al gekoppeld.");
+    else if (syncOn()) toast("Dit toestel synchroniseert al met een andere code. Stop eerst de synchronisatie bij Instellingen.", true);
+    else { try { await syncPreview(l.code); renderSync(); } catch (err) { toast(err.message || "Koppelen lukte niet.", true); } }
+  }
+  if (syncOn()) syncPlan(300);
+  // opnieuw bij het openen van de app, als het internet terug is, en elke halve minuut zolang ze open staat
+  document.addEventListener("visibilitychange", () => {
+    if (!syncOn()) return;
+    if (document.visibilityState === "visible") syncPlan(100); else if (sync.timer) syncNow().catch(() => {});
+  });
+  window.addEventListener("online", () => syncPlan(100));
+  setInterval(() => { if (syncOn() && document.visibilityState === "visible" && !sync.timer && !sync.busy) syncNow().catch(() => {}); }, 30000);
+}
+
 function renderStorageStatus(code) {
   const el = $("#storage-status");
   const m = {
@@ -154,6 +444,7 @@ function renderStorageStatus(code) {
     "browser": ["warn", "Alleen bewaard in deze browser. Maak regelmatig een back-up (Instellingen)."],
     "geheugen": ["warn", "Niet bewaard: deze browser laat geen opslag toe. Maak een back-up voor je de pagina sluit."],
   }[storage.mode] || ["", ""];
+  if (storage.mode === "browser" && syncOn()) m[0] = "ok", m[1] = "Bewaard in deze browser en versleuteld gesynchroniseerd met je andere toestellen";
   el.className = `storage ${m[0]}`;
   el.textContent = m[1];
 }
@@ -870,7 +1161,7 @@ form.addEventListener("submit", e => {
       const i = state.transactions.findIndex(x => x.id === editingId);
       if (i < 0) throw new InputError("Deze transactie bestaat niet meer (intussen verwijderd op een ander toestel?).");
       state.transactions[i] = { ...state.transactions[i], ...t, id: editingId, attachments };
-    } else state.transactions.push({ id: state.nextId++, ...t, attachments });
+    } else state.transactions.push({ id: newId(), ...t, attachments });
     proofDraft.saved = true;
     for (const a of window.BEWIJS.removedAttachments(proofDraft.before, attachments)) deleteProofFile(a);
     dlg.close(); commit();
@@ -1023,7 +1314,7 @@ async function proofBlob(a) {
     return r.blob();
   }
   const b = await idb.get(a.id);
-  if (!b) throw new Error("Bestand niet gevonden in deze browser.");
+  if (!b) throw new Error("Bestand niet gevonden in deze browser. Staat het op een ander toestel, zet het dan over met de back-up met bewijsstukken.");
   return b;
 }
 function proofReachable(a) {
@@ -1364,7 +1655,7 @@ async function importBackup(text) {
   if (!validState(s)) return toast("Dit bestand heeft niet de vorm van een back-up van deze tool.", true);
   const nf = Object.keys(files).length;
   const nc = s.cash.length;
-  if (!(await confirmDialog(`Back-up met ${s.transactions.length} transacties${nc ? `, ${nc} geldbewegingen` : ""}${nf ? ` en ${nf} bewijsstukken` : ""} herstellen? Je huidige gegevens worden vervangen.`))) return;
+  if (!(await confirmDialog(`Back-up met ${s.transactions.length} transacties${nc ? `, ${nc} geldbewegingen` : ""}${nf ? ` en ${nf} bewijsstukken` : ""} herstellen? Je huidige gegevens worden vervangen${syncOn() ? ", ook op je gekoppelde toestellen" : ""}.`))) return;
   const previous = window.BEWIJS.allAttachments(state.transactions);
   state = s; state.nextId = Math.max(state.nextId || 1, ...state.transactions.map(t => t.id + 1), ...state.cash.map(c => (c.id || 0) + 1));
   migrateToNames();
@@ -1404,7 +1695,7 @@ async function proofExists(a) {
 }
 $("#btn-reset").addEventListener("click", async () => {
   const files = state.transactions.flatMap(t => t.attachments || []);
-  if (await confirmDialog("Alle gegevens wissen? Maak eerst een back-up als je ze wil bewaren." + (files.length ? ` Ook de ${files.length} bewijsstukken worden verwijderd (die zitten enkel in de back-up met bewijsstukken).` : ""))) {
+  if (await confirmDialog("Alle gegevens wissen?" + (syncOn() ? " Ze verdwijnen ook op je gekoppelde toestellen." : "") + " Maak eerst een back-up als je ze wil bewaren." + (files.length ? ` Ook de ${files.length} bewijsstukken worden verwijderd (die zitten enkel in de back-up met bewijsstukken).` : ""))) {
     state = emptyState(); commit(); toast("Alle gegevens gewist");
     for (const a of files) deleteProofFile(a);
   }
@@ -1675,13 +1966,13 @@ $("#imp-confirm").addEventListener("click", () => {
     let added = 0;
     // omruilingen eerst: op dezelfde dag vóór de verkoop van een nieuw effect
     for (const { t } of exch) {
-      state.transactions.push({ ...t, id: state.nextId++ });
+      state.transactions.push({ ...t, id: newId() });
       for (const c of t.components) state.assets[c.asset] ??= { name: "", asset_type: "aandeel", currency: t.currency, ref_value_eur: null, ref_source: "" };
       added++;
     }
     for (const [i, t] of r.transactions.entries()) {
       if (dupFlags[i] || absorbed.has(t.import_id)) continue;
-      state.transactions.push({ ...t, owner, id: state.nextId++ });
+      state.transactions.push({ ...t, owner, id: newId() });
       added++;
     }
     const kindMap = { stock: "aandeel", etf: "etf", etc: "ander", etn: "ander", bond: "obligatie", fund: "fonds" };
@@ -1694,7 +1985,7 @@ $("#imp-confirm").addEventListener("click", () => {
       const id = `delist:${owner}:${d.asset}:${d.date}`;
       if (!add || state.transactions.some(t => t.import_id === id)) continue;
       const a = state.assets[d.asset] || {};
-      state.transactions.push({ id: state.nextId++, type: "DELISTING", delist_mode: mode, trade_date: d.date, asset: d.asset,
+      state.transactions.push({ id: newId(), type: "DELISTING", delist_mode: mode, trade_date: d.date, asset: d.asset,
         quantity: "0", price: price ?? "0", currency: mode === "UITKOOP" ? "EUR" : (a.currency || "EUR"), fx_per_eur: "1", fees: "0", taxes: "0",
         owner, broker: r.source === "saxo" ? "Saxo" : "Bolero", historic_proven: false, cost_known: true, reynders_eur: "0", amount: "0",
         split_ratio: null, import_id: id, note: `Delisting volgens ${r.source === "saxo" ? "Saxo" : "Bolero"}-export` });
@@ -1707,7 +1998,7 @@ $("#imp-confirm").addEventListener("click", () => {
       owner, broker: "Bolero", import_id: "c" + e.x.cash.import_id, import_source: e.x.cash.source }));
     if ($("#imp-cash-add").checked) for (const c of GELD.fresh(state.cash, [...r.cash, ...extraCash])) {
       const done = doneCash.has(c.import_id);
-      state.cash.push({ ...c, ...(done ? { status: "verwerkt", remark: "verwerkt in de omruiling", warn: undefined } : {}), owner, id: state.nextId++ });
+      state.cash.push({ ...c, ...(done ? { status: "verwerkt", remark: "verwerkt in de omruiling", warn: undefined } : {}), owner, id: newId() });
       cashAdded++;
     }
     for (const t of r.transactions) if (t.type === "DIVIDEND")
@@ -1720,7 +2011,7 @@ $("#imp-confirm").addEventListener("click", () => {
       }
       const corrId = `corr:${owner}:${p.asset}`;
       if (!keep && !exch.some(({ t }) => t.asset === p.asset) && !exchangedBefore(p.asset) && !state.transactions.some(t => t.import_id === corrId)) {
-        state.transactions.push({ id: state.nextId++, type: "SELL", trade_date: "2025-12-31", asset: p.asset, quantity: p.quantity, price: "0",
+        state.transactions.push({ id: newId(), type: "SELL", trade_date: "2025-12-31", asset: p.asset, quantity: p.quantity, price: "0",
           currency: "EUR", fx_per_eur: "1", fees: "0", taxes: "0", owner, broker: "Bolero", historic_proven: false, cost_known: true,
           reynders_eur: "0", amount: "0", split_ratio: null, import_id: corrId,
           note: "Correctie bij import: niet meer in bezit op 31/12/2025 (vóór 2026, dus geen belastbaar moment)" });
@@ -1823,7 +2114,7 @@ function loadExample() {
   for (const raw of ex) {
     const t = validateTx(raw);
     state.assets[t.asset] ??= { name: "", asset_type: "aandeel", currency: t.currency, ref_value_eur: null, ref_source: "" };
-    state.transactions.push({ id: state.nextId++, ...t });
+    state.transactions.push({ id: newId(), ...t });
   }
   state.assets["VOORBEELD NV"].isin = "BE0003565737";
   state.assets["VOORBEELD NV"].ref_value_eur = "80";
@@ -1910,4 +2201,5 @@ function setupInstall() {
 setupInstall();
 
 initStorage();
+initSync();
 proofs.init = initProofs();

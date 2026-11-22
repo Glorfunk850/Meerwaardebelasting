@@ -18,6 +18,8 @@ De versie die op je claude.ai-link draait. Alles werkt in de browser; er is geen
 | `geld.js` | Geldbewegingen (stortingen, opnames, kapitaalverminderingen, ...): soorten, dubbels, geldoverzicht per jaar |
 | `bewijs.js` | Bewijsstukken bij transacties: toegelaten bestandstypes, welke transacties nog een bewijs missen |
 | `simulatie.js` | Simulatie: impact van een fictieve verkoop (rekent met en zonder via de rekenkern, vergelijkt per jaar; bewaart niets) |
+| `sync.js` | Synchroniseren tussen toestellen in de app op GitHub Pages: koppelcode, versleuteling (AES-256-GCM), drie-weg samenvoegen |
+| `qrcode.js` | QR-codegenerator (Kazuhiko Arase, MIT-licentie), enkel geladen om de koppelcode als QR-code te tonen |
 | `pdf.js` | Rapport als PDF (minimale PDF-generator zonder externe bibliotheek, Helvetica met WinAnsi-tekens) |
 | `build.py` | Voegt alles samen tot `index.html` |
 | `manifest.webmanifest`, `sw.js`, `icon*` | Installeerbare app (PWA) op GitHub Pages; niet gebruikt op claude.ai |
@@ -34,6 +36,7 @@ node --test bewijs.test.js       # bewijsstukken
 node --test pdf.test.js          # PDF-generator
 node --test geld.test.js         # geldbewegingen en geldoverzicht
 node --test simulatie.test.js    # simulatie van een verkoop
+node --test sync.test.js         # synchroniseren: code, versleuteling, samenvoegen
 
 # optioneel tegen je eigen exports:
 BOLERO_FILE=pad/naar/cashmovements.xlsx node --test bolero.test.js   # of .csv
@@ -50,9 +53,33 @@ in de adresbalk of via Instellingen → *Als app installeren*; iPhone/iPad: Safa
 De service worker (`sw.js`) haalt altijd eerst de nieuwste versie op en valt zonder verbinding terug op de laatst
 bewaarde kopie. Verhoog `CACHE` in `sw.js` als je de lijst met bestanden wijzigt.
 
-Gegevens staan in die versie alleen in de browser (localStorage), los van de claude.ai-pagina. Overzetten gaat via
+Gegevens staan in die versie in de browser (localStorage), los van de claude.ai-pagina. Overzetten naar claude.ai gaat via
 Instellingen → Back-up downloaden en Back-up herstellen. Op claude.ai en bij een lokaal geopend bestand doet de
 installatiecode niets.
+
+## Synchroniseren tussen toestellen (app op GitHub Pages)
+
+Instellingen → *Synchroniseren tussen toestellen* houdt transacties, geldbewegingen, activa, ingehouden bedragen,
+fiscale parameters en instellingen gelijk op al je toestellen. Het werkt zoals de synchronisatie van DuckDuckGo en
+gebruikt dezelfde server als Voorraadbeheer (de eigen Cloudflare Worker uit de map `sync-server` van die repository;
+adres in `SYNC_SERVER` in `app.js`):
+
+- Je koppelt toestellen met een geheime code van 32 tekens (ook als QR-code). Er is geen account of wachtwoord.
+- Uit die code worden op het toestel afgeleid (HKDF): het nummer van de ruimte op de server, een schrijftoken en de
+  sleutel waarmee alles versleuteld wordt (AES-256-GCM). De code gaat nooit naar de server; die bewaart alleen het
+  versleutelde pakket. Een eigen salt zorgt dat deze tool nooit dezelfde ruimte gebruikt als Voorraadbeheer.
+- Samenvoegen is drie-weg (`sync.js`): per transactie, geldbeweging, actief en jaar, en binnen een item per veld. Alleen
+  als hetzelfde veld op twee toestellen anders gewijzigd werd, wint het toestel dat synchroniseert. Een transactie die
+  op het ene toestel gewist en op het andere gewijzigd werd, blijft bestaan. De volgorde van de transacties is op alle
+  toestellen dezelfde (ze telt bij transacties op dezelfde dag).
+- Met synchronisatie krijgen nieuwe transacties een id op basis van de tijd, zodat twee toestellen nooit hetzelfde id
+  gebruiken. Bij koppelen kies je: de gegevens van het andere toestel overnemen, of samenvoegen (dan krijgen de eigen
+  transacties eerst nieuwe id's; wat op beide toestellen al stond, komt er dan dubbel in).
+- *Alle gegevens wissen* en *Back-up herstellen* gelden ook voor de gekoppelde toestellen.
+- Bewijsstukken worden niet gesynchroniseerd; zet ze over met *Back-up met bewijsstukken*.
+- Op claude.ai is dit paneel verborgen: daar synchroniseert het Claude-account al.
+- Een QR-code opent de link in de standaardbrowser. Op iPhone/iPad heeft de app op het beginscherm een eigen opslag,
+  los van Safari: typ de code daar in de app zelf.
 
 ## Bewijsstukken
 
