@@ -65,6 +65,9 @@ label.btn input[type=file] { display: none; }
 .sync-code { border: 1px solid var(--line); border-radius: var(--radius); padding: .9rem; margin: .8rem 0; text-align: center; }
 .sync-qr { width: min(220px, 100%); margin: 0 auto .6rem; background: #fff; border-radius: 10px; padding: 6px; }
 .sync-qr svg { display: block; width: 100%; height: auto; }
+.scanner-beeld { position: relative; margin-top: .6rem; border-radius: 12px; overflow: hidden; background: #000; aspect-ratio: 1; }
+.scanner-beeld video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.scanner-kader { position: absolute; inset: 15%; border: 3px solid rgba(255, 255, 255, .85); border-radius: 14px; box-shadow: 0 0 0 999px rgba(0, 0, 0, .25); }
 .sync-tekst { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 1rem; letter-spacing: .04em; word-break: break-all; user-select: all; }
 .row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
 
@@ -514,6 +517,13 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, monospace; 
   <p class="hint">Selecteer en kopieer de tekst hieronder.</p>
   <textarea id="text-body" readonly style="min-height:240px"></textarea>
   <div class="actions"><button class="btn primary" id="text-close">Sluiten</button></div>
+</div></dialog>
+
+<dialog id="scan-dialog" style="width:min(420px,94vw)"><div class="body">
+  <p style="margin-top:0">Richt de camera op de QR-code op je andere toestel (Instellingen → Synchroniseren → <em>Toestel koppelen</em>).</p>
+  <div class="scanner-beeld"><video playsinline muted autoplay></video><span class="scanner-kader"></span></div>
+  <p class="hint" id="scan-status">Camera openen…</p>
+  <div class="actions"><button type="button" class="btn" id="scan-cancel">Annuleren</button></div>
 </div></dialog>
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
