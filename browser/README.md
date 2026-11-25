@@ -16,7 +16,6 @@ De versie die op je claude.ai-link draait. Alles werkt in de browser; er is geen
 | `saxo.js` | Importer voor de Saxo-export "Transacties" (standaard, Excel) en de oudere export "Trades" (Excel of CSV) |
 | `xlsx.js` | Minimale Excel-lezer zonder externe bibliotheek |
 | `geld.js` | Geldbewegingen (stortingen, opnames, kapitaalverminderingen, ...): soorten, dubbels, geldoverzicht per jaar |
-| `bewijs.js` | Bewijsstukken bij transacties: toegelaten bestandstypes, welke transacties nog een bewijs missen |
 | `simulatie.js` | Simulatie: impact van een fictieve verkoop (rekent met en zonder via de rekenkern, vergelijkt per jaar; bewaart niets) |
 | `sync.js` | Synchroniseren tussen toestellen in de app op GitHub Pages: koppelcode, versleuteling (AES-256-GCM), drie-weg samenvoegen |
 | `qrcode.js` | QR-codegenerator (Kazuhiko Arase, MIT-licentie), enkel geladen om de koppelcode als QR-code te tonen |
@@ -33,7 +32,6 @@ python3 build.py                 # maakt index.html
 node --test engine.test.js       # rekenkern
 node --test bolero.test.js       # Bolero-importer (synthetisch bestand)
 node --test saxo.test.js         # Saxo-importer (synthetisch bestand)
-node --test bewijs.test.js       # bewijsstukken
 node --test pdf.test.js          # PDF-generator
 node --test geld.test.js         # geldbewegingen en geldoverzicht
 node --test simulatie.test.js    # simulatie van een verkoop
@@ -77,25 +75,10 @@ adres in `SYNC_SERVER` in `app.js`):
   gebruiken. Bij koppelen kies je: de gegevens van het andere toestel overnemen, of samenvoegen (dan krijgen de eigen
   transacties eerst nieuwe id's; wat op beide toestellen al stond, komt er dan dubbel in).
 - *Alle gegevens wissen* en *Back-up herstellen* gelden ook voor de gekoppelde toestellen.
-- Bewijsstukken worden niet gesynchroniseerd; zet ze over met *Back-up met bewijsstukken*.
 - Op claude.ai is dit paneel verborgen: daar synchroniseert het Claude-account al.
 - Koppelen kan met *QR-code scannen* in de app zelf (camera; `BarcodeDetector` of anders `jsQR.js`) of door de code te
   typen. Scan niet met de gewone camera-app: die opent de link in de standaardbrowser, en op iPhone/iPad heeft de app op
   het beginscherm een eigen opslag, los van Safari. Gebeurt dat toch, dan waarschuwt de pagina in Safari.
-
-## Bewijsstukken
-
-Bij elke transactie kun je bestanden toevoegen (PDF, JPG, PNG, WEBP, GIF, TXT, CSV; max. 20 MB per bestand), bv. het
-borderel of de afrekening van de bank. Op claude.ai staan ze bij de pagina in je Claude-account (capability `assets`,
-even privé als de pagina); elders in de browser (IndexedDB). De transactie bewaart enkel naam, type, grootte en
-verwijzing. De gewone back-up bevat dus enkel die gegevens; *Back-up met bewijsstukken* (Instellingen) zet ook de
-bestanden zelf erin (base64 in het veld `proof_files`, ca. een derde groter dan de bestanden samen). Bij herstellen worden
-die bestanden opnieuw opgeslagen op de plaats waar je herstelt (en niet dubbel als ze er al staan); `proof_files` komt
-nooit in de bewaarde toestand. Zo verhuis je bewijsstukken ook tussen claude.ai en de app-versie. Zonder zo'n back-up zijn
-bestanden van de ene plaats op de andere niet te openen.
-
-De filter *Bewijs ontbreekt* toont verwervingen van activa die nog in bezit zijn en verkopen die belastbaar zijn
-(vanaf 2026) of van activa die nog in bezit zijn, zonder bewijsstuk.
 
 ## Simulatie
 
@@ -127,7 +110,6 @@ dan verschuift FIFO bij die latere verkopen; dat zit mee in het verschil. Kosten
     interpretatie, te bevestigen bij de FOD Financiën of een adviseur.
   - Fracties die in cash uitbetaald werden: registreer een verkoop van het nieuwe effect op dezelfde datum. Staan de
     nieuwe effecten ook als aankoop in de export van je broker, verwijder die aankoop (anders tellen ze dubbel).
-  - Een aankoop van een omgeruild effect telt voor *Bewijs ontbreekt* als 'in bezit' zolang de nieuwe effecten in bezit zijn.
   - Per nieuw effect kan ook het **totaal ontvangen aantal** ingevuld zijn (zo bewaart de import het): dat wordt evenredig over
     de omgeruilde loten verdeeld, het laatste lot krijgt de rest, zodat het totaal exact klopt.
 - Bolero-import, omruiling herkennen (voorstel, de gebruiker bevestigt): de export legt geen verband tussen het oude en de nieuwe
