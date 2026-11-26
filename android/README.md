@@ -23,7 +23,31 @@ netwerk), zodat Web Crypto en de camera werken zoals op een gewone https-pagina.
 Je gegevens van de browserversie of de claude.ai-pagina overzetten: koppel beide met *Synchroniseren*, of maak daar
 een back-up en herstel die in de app.
 
-## Bouwen
+## Downloaden
+
+GitHub bouwt de APK automatisch (workflow `.github/workflows/android.yml`):
+
+- **Laatste versie van `main`:** release *Android-app* (tag `android-latest`) op
+  https://github.com/Glorfunk850/Meerwaardebelasting/releases/tag/android-latest → `meerwaardebelasting.apk`.
+  Open die link op je telefoon, download de APK en open ze (sta *installeren uit onbekende bronnen* toe).
+- **Elke andere push of pull request:** tabblad *Actions* → de run → artifact `meerwaardebelasting-apk`
+  (een zip met de APK; aanmelden bij GitHub nodig).
+
+Elke build krijgt het runnummer als `versionCode`, zodat een nieuwe APK als update over de vorige installeert –
+**maar enkel als ze met dezelfde sleutel ondertekend is**. Zet daarom één keer je eigen sleutel als
+repository-secrets (*Settings → Secrets and variables → Actions*):
+
+| Secret | Inhoud |
+|---|---|
+| `ANDROID_KEYSTORE_B64` | de sleutel, base64: `base64 -w0 meerwaarde.jks` (maken: zie *Ondertekenen*) |
+| `ANDROID_KEYSTORE_PASSWORD` | wachtwoord van de keystore |
+| `ANDROID_KEY_ALIAS` | `meerwaarde` |
+| `ANDROID_KEY_PASSWORD` | wachtwoord van de sleutel (leeg laten = zelfde als de keystore) |
+
+Zonder die secrets gebruikt GitHub telkens een andere debug-sleutel: installeren lukt, maar voor een nieuwe versie
+moet je de app eerst verwijderen (en verlies je de gegevens in de app – maak eerst een back-up).
+
+## Zelf bouwen
 
 Nodig: JDK 17 of nieuwer en de Android SDK (platform 35) – het eenvoudigst met Android Studio
 (map `android/` openen), of op de opdrachtregel met Gradle 8.9 of nieuwer:
