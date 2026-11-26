@@ -1,0 +1,60 @@
+plugins { id "com.android.application" }
+
+// De app toont dezelfde pagina als de browserversie: browser/index.html (gebouwd met build.py) en de
+// QR-scripts worden bij elke build als assets meegenomen, de iconen als launcher-icoon.
+def browserDir = file("../../browser")
+def webAssets = layout.buildDirectory.dir("generated/web/assets")
+def webRes = layout.buildDirectory.dir("generated/web/res")
+def copyWeb = tasks.register("copyWeb", Copy) {
+    from(browserDir) { include "index.html", "jsQR.js", "qrcode.js" }
+    into webAssets
+}
+def copyIcon = tasks.register("copyIcon", Copy) {
+    from(browserDir) { include "icon-192.png"; rename { "ic_launcher.png" } }
+    into webRes.map { it.dir("mipmap-xxxhdpi") }
+}
+
+// Ondertekenen: zet de gegevens van je eigen sleutel in keystore.properties (niet in git), anders debug-sleutel.
+def ksFile = rootProject.file("keystore.properties")
+def ks = new Properties()
+if (ksFile.exists()) ksFile.withInputStream { ks.load(it) }
+
+android {
+    namespace "be.meerwaarde.app"
+    compileSdk 35
+    defaultConfig {
+        applicationId "be.meerwaarde.app"
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName "1.0"
+    }
+    signingConfigs {
+        if (ksFile.exists()) {
+            release {
+                storeFile rootProject.file(ks["storeFile"])
+                storePassword ks["storePassword"]
+                keyAlias ks["keyAlias"]
+                keyPassword ks["keyPassword"]
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig ksFile.exists() ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+    sourceSets {
+        main {
+            assets.srcDir webAssets
+            res.srcDir webRes
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+tasks.named("preBuild") { dependsOn copyWeb, copyIcon }

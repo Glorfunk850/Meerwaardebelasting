@@ -442,7 +442,7 @@ function scanQr() {
       try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false }); }
       catch (e) {
         const denied = e && (e.name === "NotAllowedError" || e.name === "SecurityError");
-        return finish(null, denied ? "De app mag de camera niet gebruiken. Geef toestemming in de instellingen van je browser, of typ de code met ‘Koppelen met een code’."
+        return finish(null, denied ? `De app mag de camera niet gebruiken. Geef toestemming in de instellingen van je ${window.MeerwaardeAndroid ? "telefoon (Apps → Meerwaardebelasting → Toestemmingen)" : "browser"}, of typ de code met ‘Koppelen met een code’.`
           : "De camera kon niet geopend worden. Typ de code met ‘Koppelen met een code’.");
       }
       if (done) { stream.getTracks().forEach(t => t.stop()); return; }
@@ -529,10 +529,10 @@ function renderStorageStatus(code) {
     "account-laden": ["", "Je gegevens worden geladen…"],
     "account-traag": ["warn", "Je account-opslag reageert nog niet; wat je ziet kan verouderd zijn."],
     "account-fout": ["warn", "Verbinding met je account-opslag verbroken" + (code ? ` (${code})` : "") + ". Wijzigingen blijven in deze browser."],
-    "browser": ["warn", "Alleen bewaard in deze browser. Maak regelmatig een back-up (Instellingen)."],
+    "browser": ["warn", `Alleen bewaard ${window.MeerwaardeAndroid ? "in de app op dit toestel" : "in deze browser"}. Maak regelmatig een back-up (Instellingen).`],
     "geheugen": ["warn", "Niet bewaard: deze browser laat geen opslag toe. Maak een back-up voor je de pagina sluit."],
   }[storage.mode] || ["", ""];
-  if (storage.mode === "browser" && syncOn()) m[0] = "ok", m[1] = "Bewaard in deze browser en versleuteld gesynchroniseerd met je andere toestellen";
+  if (storage.mode === "browser" && syncOn()) m[0] = "ok", m[1] = `Bewaard ${window.MeerwaardeAndroid ? "in de app op dit toestel" : "in deze browser"} en versleuteld gesynchroniseerd met je andere toestellen`;
   el.className = `storage ${m[0]}`;
   el.textContent = m[1];
 }
@@ -1484,6 +1484,15 @@ $("#withheld-table").addEventListener("click", e => {
 
 // back-up
 async function offerDownload(filename, text, fallbackLabel) { // text: tekst of Blob
+  if (window.MeerwaardeAndroid) { // Android-app: de app vraagt waar het bestand moet komen
+    try {
+      const blob = text instanceof Blob ? text : new Blob([text], { type: filename.endsWith(".csv") ? "text/csv" : "application/json" });
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      let bin = ""; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      window.MeerwaardeAndroid.saveFile(filename, blob.type || "application/octet-stream", btoa(bin));
+      return;
+    } catch {}
+  }
   const use = window.claude && window.claude.use ? window.claude.use.bind(window.claude) : null;
   const dl = use ? await use("downloads").catch(() => null) : null;
   if (dl) {
@@ -2016,6 +2025,7 @@ function installHint(ua, platform, touch) {
 // ================================================================ installeerbare app (enkel op een eigen adres, niet op claude.ai)
 function setupInstall() {
   const host = location.hostname;
+  if (window.MeerwaardeAndroid) return; // Android-app: al geïnstalleerd
   if (location.protocol === "file:" || /claude/i.test(host) || window.claude || !("serviceWorker" in navigator)) return;
   if (!window.isSecureContext) return;
   navigator.serviceWorker.register("sw.js").catch(() => {});
