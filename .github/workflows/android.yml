@@ -1,0 +1,66 @@
+name: android
+
+# Bouwt de Android-app (APK). Bij elke push staat de APK als artifact bij de run;
+# bij een push naar main komt ze ook in de release "android-latest" (vaste downloadlink).
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.3"
+
+      # Eigen sleutel uit de repository-secrets (zie android/README.md). Zonder secrets: debug-sleutel van de
+      # runner, die elke run verschilt – zo'n APK kan je niet als update over een vorige installeren.
+      - name: Sleutel
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > meerwaarde.jks
+            printf 'storeFile=meerwaarde.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+              "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "${KEY_PASSWORD:-$KEYSTORE_PASSWORD}" > keystore.properties
+          else
+            echo "::warning::Geen ANDROID_KEYSTORE_B64-secret: APK met debug-sleutel (geen updates mogelijk)."
+          fi
+
+      - name: APK bouwen
+        run: gradle --no-daemon assembleRelease -PversionCode=${{ github.run_number }} -PversionName=1.${{ github.run_number }}
+
+      - run: mv app/build/outputs/apk/release/app-release.apk meerwaardebelasting.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: meerwaardebelasting-apk
+          path: android/meerwaardebelasting.apk
+
+      - name: Release android-latest bijwerken
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="Android-app, gebouwd uit ${GITHUB_SHA::7} (versie 1.${{ github.run_number }}). Download meerwaardebelasting.apk en open ze op je telefoon."
+          if gh release view android-latest >/dev/null 2>&1; then
+            gh release upload android-latest meerwaardebelasting.apk --clobber
+            gh release edit android-latest --notes "$notes"
+          else
+            gh release create android-latest meerwaardebelasting.apk --title "Android-app" --notes "$notes"
+          fi
